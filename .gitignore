@@ -22,3 +22,5 @@ timing_summary.log
 *.json
 /hacks
 /AMD_run_scripts
+/helpers/create_new_model_def.py
+/helpers/fuse_vit_qkv.py
