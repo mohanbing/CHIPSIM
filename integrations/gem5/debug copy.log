@@ -1,0 +1,3 @@
+clk i_ni i_router o_ni o_ni vnet flits
+1 11 11 112 12 0 3136
+1 14 14 115 15 0 3136

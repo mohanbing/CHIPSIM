@@ -1,0 +1,68 @@
+# Post-processor job configurations
+# This file contains configurations for processing multiple chiplet simulation results
+
+jobs:
+  - workload_name: "workload_1rate_50us_1-1.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "workload_1rate_50us_3-3.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "workload_1rate_50us_5-5.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "workload_1rate_50us_10-10.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: true
+    generate_visualizations: false
+
+  - workload_name: "workload_1rate_50us_20-20.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false

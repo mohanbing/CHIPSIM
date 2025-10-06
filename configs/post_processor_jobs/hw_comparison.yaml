@@ -1,0 +1,13 @@
+jobs:
+  - workload_name: "hw_comparison.csv"
+    comm_simulator: "Garnet"
+    comm_method: "non-pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "mapping_10_hw_comparison.yaml"
+    num_chiplets: 10
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false

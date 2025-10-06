@@ -1,0 +1,29 @@
+# Full Analysis Post-processor Jobs
+# Complete processing with all supplementary simulations, plots, and visualizations
+
+jobs:
+  - workload_name: "workload_1rate_50us_10-10.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 100.0
+    run_wkld_agg_comm: true
+    run_ind_comm: true
+    run_net_agg_comm: true
+    generate_plots: true
+    generate_visualizations: true
+
+  - workload_name: "workload_1rate_50us_20-20.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "chiplet_mapping_100.yaml"
+    num_chiplets: 100
+    warmup_period_us: 100.0
+    run_wkld_agg_comm: true
+    run_ind_comm: true
+    run_net_agg_comm: true
+    generate_plots: true
+    generate_visualizations: true

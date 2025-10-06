@@ -1,0 +1,65 @@
+jobs:
+  - workload_name: "vit_fusion_1.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "mapping_100_with_io.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "vit_fusion_2.csv"
+    comm_simulator: "Garnet"
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "mapping_100_with_io.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "vit_fusion_5.csv"
+    comm_simulator: "Garnet"  
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "mapping_100_with_io.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "vit_fusion_10.csv"
+    comm_simulator: "Garnet"  
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "mapping_100_with_io.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false
+
+  - workload_name: "vit_fusion_20.csv"
+    comm_simulator: "Garnet"  
+    comm_method: "pipelined"
+    adj_matrix_file: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping_file: "mapping_100_with_io.yaml"
+    num_chiplets: 100
+    warmup_period_us: 0.0
+    run_wkld_agg_comm: false
+    run_ind_comm: false
+    run_net_agg_comm: false
+    generate_plots: false
+    generate_visualizations: false

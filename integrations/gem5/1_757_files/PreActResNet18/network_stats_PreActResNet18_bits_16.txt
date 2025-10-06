@@ -1,0 +1,8 @@
+
+simTicks = 59395500                       # Number of ticks simulated (Tick)
+average_packet_latency = 16479942.274026                       (Unspecified)
+average_packet_queueing_latency = 16470679.843448                       (Unspecified)
+average_packet_network_latency = 9262.430578                       (Unspecified)
+packets_injected = 99392                       (Unspecified)
+packets_received = 99392                       (Unspecified)
+average_hops = 3.731487                       (Unspecified)
