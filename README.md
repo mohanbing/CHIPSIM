@@ -2,6 +2,16 @@
 
 A co-simulation framework for evaluating DNN workload execution on chiplet-based in-memory computing systems. The simulator models both computation (analog in-memory compute) and communication (Network-on-Interposer) with cycle-accurate network simulation.
 
+## NOTE
+- **Simulator is in its initial release, full correct functionality not yet guaranteed.**
+
+- Thermal integration is currently manual
+
+
+## Manuscript
+
+The paper CHIPSIM was created for can be found here: **TODO**
+
 ## Documentation
 
 - **[Components & Architecture](docs/components.md)** - Core modules and system architecture
@@ -91,12 +101,12 @@ Maps chiplet IDs to chiplet types and their compute specifications.
 **Format:**
 ```yaml
 1: IO
-2: Accumulator
-3: SharedADC
+2: IMC_A
+3: IMC_B
 ...
 ```
 
-**Available chiplet types:** `IO`, `Accumulator`, `SharedADC`, `ADCless`, `RAELLA`, `CMOS_Compute`
+**Available chiplet types (examples):** `IMC_A`, `IMC_B`, `IMC_C`, `IMC_D`, `IMC_E`, `IMC_F`, `IO`, `CMOS_Compute`
 - Each type defined in `assets/chiplet_specs/chiplet_params.py`
 - Types differ in compute capabilities, area, and power
 - Memory model:
@@ -121,13 +131,6 @@ MODEL_DEFINITIONS = {
     }
 }
 ```
-
-**Add new models:**
-```bash
-python3 helpers/create_new_model_def.py
-```
-See [Helper Scripts](docs/helper-scripts.md) for details.
-
 
 ## Configuration
 
@@ -266,7 +269,3 @@ Enhanced results added to `_results/formatted_results/<raw_results_dir_name>/`:
 - **[Advanced Features](docs/advanced-features.md)** - Communication caching, weight strategies, DSENT
 - **[GEM5 Integration](docs/gem5-integration.md)** - Installation, testing, and power analysis
 - **[Helper Scripts](docs/helper-scripts.md)** - Input file generation and model management
-
-## Known Issues
-
-- Simulator has recently been heavily refactored. Simulation output correctness is **UNVERIFIED**.

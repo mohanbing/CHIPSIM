@@ -144,14 +144,7 @@ While there's no dedicated helper script for chiplet mappings, you can manually 
 ```
 
 **Available chiplet types** (defined in `assets/chiplet_specs/chiplet_params.py`):
-These chiplet types adopted from CiMLoop (plus CMOS)
-
-- `IO`: Input/output interface chiplets
-- `Accumulator`: Basic compute with accumulation
-- `SharedADC`: Shared ADC resources
-- `ADCless`: No analog-to-digital converters
-- `RAELLA`: Specific architecture variant
-- `CMOS_Compute`: CMOS analytical compute with `total_memory_weights` used as capacity
+Examples include `IMC_A`, `IMC_B`, `IMC_C`, `IMC_D`, `IMC_E`, `IMC_F`, `IO`, and `CMOS_Compute`.
 
 ## Related Documentation
 
