@@ -2,6 +2,7 @@ import os
 import json
 import numpy as np
 import hashlib
+import pickle
 
 class CacheManager:
     """
@@ -26,69 +27,55 @@ class CacheManager:
         Returns:
             dict: The cache data
         """
-        try:
-            # If clear_cache is True, delete existing cache file and return empty cache
-            if self.clear_cache:
-                if os.path.exists(self.cache_file):
-                    print(f"🗑️ Clearing cache at {self.cache_file}")
-                    os.remove(self.cache_file)
-                return {}
-                
-            # Otherwise load the cache if it exists
+        # If clear_cache is True, delete existing cache file and return empty cache
+        if self.clear_cache:
             if os.path.exists(self.cache_file):
-                with open(self.cache_file, 'r') as f:
-                    loaded_cache = json.load(f)
-                    # Convert string keys back to tuples where appropriate
-                    return self._deserialize_cache(loaded_cache)
-            else:
-                # Create the directory if it doesn't exist
-                os.makedirs(os.path.dirname(self.cache_file), exist_ok=True)
-                # Return an empty cache
-                return {}
-        except Exception as e:
-            print(f"⚠️ Warning: Failed to load cache from {self.cache_file}: {e}")
+                try:
+                    os.remove(self.cache_file)
+                except Exception as e:
+                    raise RuntimeError(f"Failed to clear cache at {self.cache_file}: {e}")
+            return {}
+
+        # Otherwise load the cache if it exists
+        if os.path.exists(self.cache_file):
+            try:
+                with open(self.cache_file, 'rb') as f:
+                    loaded_cache = pickle.load(f)
+            except Exception as e:
+                raise RuntimeError(f"Failed to read/parse cache file {self.cache_file}: {e}")
+            # Cache stored as native Python structures (including tuple keys)
+            return loaded_cache if isinstance(loaded_cache, dict) else {}
+        else:
+            # Create the directory if it doesn't exist
+            try:
+                directory = os.path.dirname(self.cache_file)
+                if directory:
+                    os.makedirs(directory, exist_ok=True)
+            except Exception as e:
+                raise RuntimeError(f"Failed to create cache directory for {self.cache_file}: {e}")
+            # Return an empty cache
             return {}
     
     def save_cache(self):
         """
         Save the cache to file.
         """
+        # Atomic write (pickle) to avoid partial/corrupt files
+        tmp_path = f"{self.cache_file}.tmp"
         try:
-            # Convert cache to JSON-serializable format
-            serializable_cache = self._make_serializable(self.cache)
-            with open(self.cache_file, 'w') as f:
-                json.dump(serializable_cache, f, indent=2)
+            with open(tmp_path, 'wb') as f:
+                pickle.dump(self.cache, f, protocol=pickle.HIGHEST_PROTOCOL)
+            os.replace(tmp_path, self.cache_file)
         except Exception as e:
-            print(f"⚠️ Warning: Failed to save cache to {self.cache_file}: {e}")
+            # Cleanup tmp file if present
+            try:
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except Exception:
+                pass
+            raise RuntimeError(f"Failed to write cache to {self.cache_file}: {e}")
     
-    def _make_serializable(self, obj):
-        """
-        Convert an object to a JSON-serializable format.
-        Handles tuples as keys by converting them to strings.
-        """
-        if isinstance(obj, dict):
-            serializable = {}
-            for key, value in obj.items():
-                # Convert tuple keys to strings
-                if isinstance(key, tuple):
-                    new_key = str(key)
-                else:
-                    new_key = key
-                serializable[new_key] = self._make_serializable(value)
-            return serializable
-        elif isinstance(obj, (list, tuple)):
-            return [self._make_serializable(item) for item in obj]
-        else:
-            return obj
-    
-    def _deserialize_cache(self, obj):
-        """
-        Deserialize cache data, converting string representations of tuples back to tuples.
-        This is a simple implementation that doesn't try to parse all strings.
-        """
-        # For now, just return the object as-is since the cache typically uses string keys
-        # If needed, implement tuple string parsing here
-        return obj
+    # Legacy JSON conversion helpers removed; cache is stored as native Python via pickle
 
     def compute_cache_key(self, **params):
         """
@@ -127,7 +114,17 @@ class CacheManager:
         Returns:
             object: Cached result or None if not found
         """
-        return self.cache.get(key)
+        if key not in self.cache:
+            return None
+        value = self.cache.get(key)
+        # Treat empty or None cached entries as errors to avoid infinite loops upstream
+        if value is None:
+            raise RuntimeError(f"Cache error: key {key} exists but value is None")
+        if isinstance(value, dict) and len(value) == 0:
+            raise RuntimeError(f"Cache error: key {key} has empty dict value")
+        if isinstance(value, (list, tuple)) and len(value) == 0:
+            raise RuntimeError(f"Cache error: key {key} has empty sequence value")
+        return value
     
     def has_result(self, key):
         """
@@ -149,5 +146,7 @@ class CacheManager:
             key (str): Cache key
             result (object): Result to store
         """
+        if result is None:
+            raise RuntimeError(f"Refusing to store None for cache key {key}")
         self.cache[key] = result
         self.save_cache() 

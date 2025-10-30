@@ -8,6 +8,7 @@ MappedModel class and providing access to system-level chiplet parameters.
 """
 
 from typing import Dict, List, Optional
+
 from .comm_types import (
     Phase, TrafficMatrixDict,
     ActivationCommPhase, WeightLoadingPhase

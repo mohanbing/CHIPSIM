@@ -109,6 +109,20 @@ python3 helpers/create_def_from_cimloop.py --input <cimloop_file> --output <mode
 
 **Note:** CiMLoop is a cycle-accurate simulator for compute-in-memory architectures.
 
+### create_new_model_def.py
+
+Create a new model definition from scratch using guided prompts.
+
+**Usage:**
+```bash
+python3 helpers/create_new_model_def.py
+```
+
+**What it does:**
+- Scaffolds a model entry in `assets/DNN_models/model_definitions.py`
+- Validates structure and basic parameters
+- Prints next steps to integrate the model in workloads
+
 ## Chiplet Mapping Helpers
 
 While there's no dedicated helper script for chiplet mappings, you can manually create them as YAML files in `assets/chiplet_specs/`.
@@ -130,13 +144,14 @@ While there's no dedicated helper script for chiplet mappings, you can manually 
 ```
 
 **Available chiplet types** (defined in `assets/chiplet_specs/chiplet_params.py`):
-These chiplet types addopted from CIMLoop
+These chiplet types adopted from CiMLoop (plus CMOS)
 
 - `IO`: Input/output interface chiplets
 - `Accumulator`: Basic compute with accumulation
 - `SharedADC`: Shared ADC resources
 - `ADCless`: No analog-to-digital converters
 - `RAELLA`: Specific architecture variant
+- `CMOS_Compute`: CMOS analytical compute with `total_memory_weights` used as capacity
 
 ## Related Documentation
 

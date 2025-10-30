@@ -1,5 +1,0 @@
-Total Router Dynamic Power: 0.019254184000000004
-Total Router Leakage Power: 0.5609620000000001
-Total Link Dynamic Power: 0.0991237
-Total Link Leakage Power: 8.72836e-05
-Total Power: 0.6794271676000001

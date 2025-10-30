@@ -1,14 +1,47 @@
+import glob
 import os
+import pickle
 import re
+import sys
+
 import matplotlib.pyplot as plt
 import matplotlib.ticker as mticker
 from matplotlib.colors import ListedColormap
 
+
 class CrossSimProcessor:
-    def __init__(self, collected_analysis_data, base_output_dir):
-        self.collected_analysis_data = collected_analysis_data
-        self.base_output_dir = base_output_dir
-        self.cross_analysis_output_dir = os.path.join(self.base_output_dir, "cross_simulation_analysis_results")
+    """
+    Standalone cross-simulation analysis processor.
+    
+    Loads results from multiple simulation runs and performs comparative analysis.
+    """
+    
+    def __init__(self, result_directories, base_output_dir=None, analysis_name="cross_simulation_analysis"):
+        """
+        Initialize the cross-simulation processor.
+        
+        Args:
+            result_directories (list): List of raw results directory paths to analyze
+            base_output_dir (str, optional): Base directory for output. Defaults to _results/
+            analysis_name (str, optional): Name for this analysis. Defaults to "cross_simulation_analysis"
+        """
+        self.result_directories = result_directories
+        
+        # Set base output directory
+        if base_output_dir is None:
+            self.base_output_dir = os.path.join(os.getcwd(), "_results")
+        else:
+            self.base_output_dir = base_output_dir
+            
+        self.analysis_name = analysis_name
+        self.cross_analysis_output_dir = os.path.join(
+            self.base_output_dir, 
+            "cross_simulation_analysis_results",
+            analysis_name
+        )
+        
+        # Loaded data from result directories
+        self.collected_analysis_data = []
         
         # Create organized subdirectories for different plot categories
         self.performance_dir = os.path.join(self.cross_analysis_output_dir, "performance_analysis")
@@ -27,6 +60,161 @@ class CrossSimProcessor:
         self.workload_inputs_parser_regex = re.compile(r"_(\d+)(?:-\d+)?\.csv")
         # Regex to extract the 'TTT' (runtime) from 'workload_..._TTTus_...'
         self.workload_runtime_parser_regex = re.compile(r"_(\d+)us_")
+    
+    def analyze(self):
+        """
+        Perform complete cross-simulation analysis workflow.
+        
+        This method loads all result directories, extracts metrics, and generates
+        all comparison plots.
+        """
+        print("\n" + "="*80)
+        print("🔬 STARTING CROSS-SIMULATION ANALYSIS")
+        print("="*80)
+        print(f"📊 Analysis Name: {self.analysis_name}")
+        print(f"📁 Number of Result Directories: {len(self.result_directories)}")
+        print(f"💾 Output Directory: {self.cross_analysis_output_dir}")
+        print("="*80)
+        
+        # Load all results
+        self._load_all_results()
+        
+        if not self.collected_analysis_data:
+            print("❌ No data loaded successfully. Cannot perform analysis.")
+            return
+        
+        # Perform all analyses
+        print("\n🔄 Generating comparison plots...")
+        self.plot_model_performance_vs_inputs()
+        self.plot_execution_time_vs_inputs_by_topology()
+        self.plot_execution_time_vs_inputs_by_chiplet_mapping()
+        self.plot_avg_model_latency_vs_inputs_by_topology()
+        self.plot_execution_time_percent_difference_by_topology()
+        self.plot_utilization_vs_inputs()
+        self.plot_latency_vs_utilization()
+        
+        print("\n" + "="*80)
+        print("🏁 CROSS-SIMULATION ANALYSIS COMPLETE")
+        print("="*80)
+        print(f"📁 Results saved to: {self.cross_analysis_output_dir}")
+        print("="*80)
+    
+    def _load_all_results(self):
+        """Load metric computers and config info from all result directories."""
+        print("\n🔄 Loading results from directories...")
+        
+        for i, results_dir in enumerate(self.result_directories, 1):
+            print(f"\n  [{i}/{len(self.result_directories)}] Loading: {os.path.basename(results_dir)}")
+            
+            try:
+                data_item = self._load_single_result(results_dir)
+                if data_item:
+                    self.collected_analysis_data.append(data_item)
+                    print(f"  ✅ Loaded successfully")
+                else:
+                    print(f"  ⚠️  Failed to load (see errors above)")
+            except Exception as e:
+                print(f"  ❌ Error loading result: {e}")
+        
+        print(f"\n✅ Successfully loaded {len(self.collected_analysis_data)} result(s)")
+    
+    def _load_single_result(self, results_dir):
+        """
+        Load a single simulation result.
+        
+        Args:
+            results_dir (str): Path to the results directory (either raw or formatted)
+            
+        Returns:
+            dict: Dictionary containing config_info and metric_computer, or None if failed
+        """
+        # Determine if this is a raw results directory or formatted results directory
+        # Raw results contain .pkl files, formatted results don't
+        pkl_files = glob.glob(os.path.join(results_dir, "*.pkl"))
+        
+        if pkl_files:
+            # This is a raw results directory - need to process it
+            print(f"    ℹ️  Detected raw results directory, processing...")
+            return self._load_from_raw_results(results_dir)
+        else:
+            # This is a formatted results directory - load metric computer from there
+            # (This would require the formatted results to also save the metric computer)
+            print(f"    ⚠️  Formatted results directory detected - not yet supported")
+            print(f"    💡 Please provide raw results directories for cross-analysis")
+            return None
+    
+    def _load_from_raw_results(self, raw_results_dir):
+        """
+        Load and process a raw results directory.
+        
+        Args:
+            raw_results_dir (str): Path to raw results directory
+            
+        Returns:
+            dict: Dictionary containing config_info and metric_computer
+        """
+        from src.post.metrics import MetricComputer
+        
+        # Find and load the .pkl file
+        pkl_files = glob.glob(os.path.join(raw_results_dir, "*.pkl"))
+        
+        if len(pkl_files) != 1:
+            print(f"    ❌ Expected 1 .pkl file, found {len(pkl_files)}")
+            return None
+        
+        pkl_file = pkl_files[0]
+        
+        # Load the global manager
+        try:
+            with open(pkl_file, 'rb') as f:
+                gm = pickle.load(f)
+        except Exception as e:
+            print(f"    ❌ Failed to load pickle file: {e}")
+            return None
+        
+        # Migrate legacy attributes
+        if hasattr(gm, '_migrate_legacy_attributes'):
+            gm._migrate_legacy_attributes()
+        
+        # Apply warmup filter (using default warmup period from gm)
+        warmup_period = getattr(gm, 'warmup_period_us', 0.0)
+        gm.warmup_period_us = warmup_period
+        gm.filter_retired_networks_by_warmup()
+        
+        # Create metric computer
+        dsent_stats_path = os.path.join(raw_results_dir, 'dsent_stats.jsonl')
+        
+        try:
+            metric_computer = MetricComputer(
+                gm.post_warmup_retired_models,
+                gm.global_time_us,
+                gm.system.num_chiplets,
+                dsent_stats_file_path=dsent_stats_path
+            )
+            
+            # Compute necessary metrics
+            metric_computer.compute_avg_system_utilization()
+            metric_computer.compute_utilization_over_time(gm.time_step_us)
+            metric_computer.compute_model_summary_metrics()
+        except Exception as e:
+            print(f"    ❌ Failed to compute metrics: {e}")
+            return None
+        
+        # Extract config info from directory name and global manager
+        config_info = {
+            "workload_name": os.path.basename(gm.workload_manager.wl_file),
+            "comm_simulator": gm.communication_simulator,
+            "comm_method": gm.communication_method,
+            "adj_matrix_file": os.path.basename(gm.adj_matrix_file),
+            "chiplet_mapping_file": os.path.basename(gm.chiplet_mapping_file),
+            "match_identifier": os.path.basename(raw_results_dir),
+            "results_dir": raw_results_dir
+        }
+        
+        return {
+            "config_info": config_info,
+            "metric_computer": metric_computer
+        }
 
 
     def _plot_line_chart(self, series_data_map, x_label, y_label, title, filename, 
@@ -208,12 +396,6 @@ class CrossSimProcessor:
         
         # TODO: Fix in the future
         empty_system_individual_model_results = { 
-                "alexnet": {"latency": {"total": 213.46, "compute": 14.98, "communication": 198.48, "activation_comm": 198.48, "weight_loading": 0.0}, "energy": {}},
-                "resnet18": {"latency": {"total": 72.18, "compute": 27.48, "communication": 44.70, "activation_comm": 44.70, "weight_loading": 0.0}, "energy": {}},
-                "resnet34": {"latency": {"total": 165.68, "compute": 57.72, "communication": 107.95, "activation_comm": 107.95, "weight_loading": 0.0}, "energy": {}},
-                "resnet50": {"latency": {"total": 460.49, "compute": 50.47, "communication": 410.02, "activation_comm": 410.02, "weight_loading": 0.0}, "energy": {}},
-                "mobilenet_v3": {"latency": {"total": 23.04, "compute": 7.70, "communication": 15.34, "activation_comm": 15.34, "weight_loading": 0.0}, "energy": {}},
-                "vision_transformer_qkv_fusion": {"latency": {"total": 18639.38, "compute": 210.32 , "communication": 18428.0, "activation_comm": 4594.86, "weight_loading": 13834.20}, "energy": {}},
             }
         
         """

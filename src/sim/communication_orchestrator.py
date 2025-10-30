@@ -2,7 +2,8 @@
 
 import numpy as np
 from typing import Dict, List, Tuple, Optional
-from ..core.comm_types import ComputePhase
+import ast
+from src.core.comm_types import ComputePhase
 
 
 class CommunicationOrchestrator:
@@ -413,9 +414,20 @@ class CommunicationOrchestrator:
             global_time_us: Current simulation time
         """
         for key, new_simulated_latency_us in all_phase_latencies.items():
-            # Handle different key formats - take first 3 elements
+            # Accept tuple or stringified tuple keys of the form (net_idx, input_idx, phase_id)
             if isinstance(key, tuple) and len(key) >= 3:
                 net_idx, inp_idx, phase_id = key[0], key[1], key[2]
+            elif isinstance(key, str):
+                try:
+                    parsed = ast.literal_eval(key)
+                    if isinstance(parsed, tuple) and len(parsed) >= 3:
+                        net_idx, inp_idx, phase_id = parsed[0], parsed[1], parsed[2]
+                    else:
+                        print(f"ERROR: Unexpected key format after parse: {key} -> {parsed}")
+                        continue
+                except Exception:
+                    print(f"ERROR: Unexpected key format: {key} (type: {type(key)})")
+                    continue
             else:
                 print(f"ERROR: Unexpected key format: {key} (type: {type(key)})")
                 continue

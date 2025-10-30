@@ -51,6 +51,11 @@ class LayerPartitioner:
             # Add percentage information for reference
             partitioned_layer['percentage'] = percentage
             
+            # Propagate and partition total_macs proportionally if it exists
+            if 'total_macs' in layer_def:
+                original_total_macs = layer_def['total_macs']
+                partitioned_layer['total_macs'] = original_total_macs * (percentage / 100.0)
+            
             # Adjust the layer parameters based on the percentage and layer type
             if is_conv_layer:
                 # For convolutional layers, partition along the output channels

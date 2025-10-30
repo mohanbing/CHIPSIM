@@ -1,31 +1,61 @@
+# ==============================================================================
 # Chiplet Simulator Configuration
-# Edit these values to configure your simulation
+# ==============================================================================
 
-# Simulation input files
-workload: "workload_alexnet_multi.csv"
-adj_matrix: "adj_matrix_10x10_mesh.csv"
-chiplet_mapping: "mapping_100_with_io.yaml"
-network_defs: "model_definitions.py"
+# ==============================================================================
+# SIMULATION PARAMETERS
+# ==============================================================================
 
-# Simulation parameters
-clear_cache: false
-comm_simulator: "Garnet"  # 'Garnet' or 'Booksim'
-comm_method: "non-pipelined"  # 'pipelined' or 'non-pipelined'
-enable_dsent: false  # Enable DSENT simulation
-enable_comm_cache: false
-warmup_period_us: 0.0  # Warmup period in microseconds
-blocking_age_threshold: 10  # Threshold for blocking network age
-weight_stationary: true  # Weight stationary mode for in-memory computing
-weight_loading_strategy: "all_at_once"  # Weight loading strategy: "all_at_once" or "just_in_time"
+simulation:
+  # Input Files
+  input_files:
+    workload: "workload_alexnet_multi.csv"
+    adj_matrix: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping: "mapping_100_with_io.yaml"
+    model_defs: "model_definitions.py"
+  
+  # Core Simulation Settings
+  core_settings:
+    clear_cache: false
+    comm_simulator: "Garnet"  # Options: 'Garnet' or 'Booksim'
+    comm_method: "non-pipelined"  # Options: 'pipelined' or 'non-pipelined'
+    enable_dsent: false
+    enable_comm_cache: false
+    warmup_period_us: 0.0
+    blocking_age_threshold: 10
+    weight_stationary: true
+    weight_loading_strategy: "all_at_once"  # Options: "all_at_once" or "just_in_time"
+  
+  # Hardware Parameters
+  hardware_parameters:
+    bits_per_activation: 8
+    bits_per_packet: 128
+    network_operation_frequency_hz: 1000000000
+  
+  # Gem5-Specific Parameters (change infrequently)
+  gem5_parameters:
+    gem5_sim_cycles: 500000000
+    gem5_injection_rate: 0.0
+    gem5_ticks_per_cycle: 1000
+    gem5_deadlock_threshold: null
+  
+  # DSENT Parameters
+  dsent_parameters:
+    dsent_tech_node: "32"
 
-# Parameterized knobs
-bits_per_activation: 8
-bits_per_packet: 128
-network_operation_frequency_hz: 1000000000
+# ==============================================================================
+# POST-PROCESSING PARAMETERS
+# ==============================================================================
 
-# gem5 specific parameters (change infrequently)
-gem5_sim_cycles: 500000000
-gem5_injection_rate: 0.0
-gem5_ticks_per_cycle: 1000
-gem5_deadlock_threshold: null
-dsent_tech_node: "32"
+post_processing:
+  # Warmup filtering
+  warmup_period_us: 0.0
+  
+  # Supplementary communication simulations
+  run_wkld_agg_comm: false      # Workload aggregate communication
+  run_ind_comm: false            # Individual layer communication
+  run_net_agg_comm: false        # Network aggregate communication
+  
+  # Output generation
+  generate_plots: true           # Generate utilization, power plots
+  generate_visualizations: false # Generate network mapping visualizations

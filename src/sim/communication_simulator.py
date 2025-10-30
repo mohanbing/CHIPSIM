@@ -1,16 +1,16 @@
 import os
 import sys
-import numpy as np
 import subprocess
 import gzip
 import re
 import json
 import tempfile
-from ..managers.cache_manager import CacheManager
+import hashlib
 
+import numpy as np
+import logging
 
-ENABLE_CACHE = False
-
+from src.managers.cache_manager import CacheManager
 
 class CommunicationSimulator:
     """
@@ -24,7 +24,7 @@ class CommunicationSimulator:
                  system, 
                  simulator_type="Garnet", 
                  communication_method="non-pipelined", 
-                 cache_file="communication_cache.json", 
+                 cache_file="communication_cache.pkl", 
                  clear_cache=False, 
                  network_operation_frequency=1000000000,
                  enable_dsent=True,
@@ -70,6 +70,21 @@ class CommunicationSimulator:
         
         # Initialize the cache manager
         self.cache_manager = CacheManager(cache_file, clear_cache)
+
+        # Setup debug logger (once)
+        self._comm_logger = logging.getLogger('comm_debug')
+        if not self._comm_logger.handlers:
+            self._comm_logger.setLevel(logging.INFO)
+            logs_dir = os.path.join(os.getcwd(), 'temp', 'logs')
+            try:
+                os.makedirs(logs_dir, exist_ok=True)
+            except Exception:
+                pass
+            fh = logging.FileHandler(os.path.join(logs_dir, 'comm_debug.log'))
+            fh.setLevel(logging.INFO)
+            fmt = logging.Formatter('%(asctime)s | %(message)s')
+            fh.setFormatter(fmt)
+            self._comm_logger.addHandler(fh)
 
         # Convert adjacency matrix to Garnet topology file for AnyNet
         if not hasattr(self.system, 'adj_matrix') or self.system.adj_matrix is None:
@@ -123,6 +138,9 @@ class CommunicationSimulator:
         # ----------------------------------------------------
         # Generate cache key
         # ----------------------------------------------------
+        # Build robust system params for cache key
+        # Include topology hash and DSENT enable flag to avoid cross-run collisions
+        topo_hash = hashlib.sha256(self.system.adj_matrix.astype(int).tobytes()).hexdigest() if hasattr(self.system, 'adj_matrix') else "no_topo"
         system_params = {
             "num_chiplets": self.system.num_chiplets,
             "simulator_type": self.simulator_type,
@@ -133,6 +151,9 @@ class CommunicationSimulator:
             "gem5_ticks_per_cycle": self.gem5_ticks_per_cycle,
             "gem5_deadlock_threshold": self.gem5_deadlock_threshold,
             "dsent_tech_node": self.dsent_tech_node,
+            "enable_dsent": bool(self.enable_dsent),
+            "topology_hash": topo_hash,
+            "topology_rows": 10,  # current Mesh_XY rows setting
         }
         
         # Combine all matrices for cache key calculation
@@ -155,20 +176,36 @@ class CommunicationSimulator:
         # ----------------------------------------------------
         # Check cache
         # ----------------------------------------------------
-        if (self.enable_cache or ENABLE_CACHE) and self.cache_manager.has_result(cache_key):
-            network_info = f" (Network: {network_name})" if network_name else ""
-            phases_info = f" ({len(active_phases_info)} active phases)" if active_phases_info else ""
-            print(f"🔄 Using cached {simulation_type} communication simulation result{network_info}{phases_info}")
-            network_stats = self.cache_manager.get_result(cache_key)
-            return network_stats
+        cached_result = None
+        if (self.enable_cache) and self.cache_manager.has_result(cache_key):
+            cached_result = self.cache_manager.get_result(cache_key)
+
+        if cached_result:
+            # Validate that the cached result contains latencies for all active phases
+            valid_cache = True
+            if 'latency' in cached_result and 'all_phase_latencies_us' in cached_result['latency']:
+                cached_keys = set(cached_result['latency']['all_phase_latencies_us'].keys())
+                current_keys = set(active_phases_info)
+                if not current_keys.issubset(cached_keys):
+                    valid_cache = False
+                    print(f"⚠️  Cached result is missing {len(current_keys - cached_keys)} phase(s). Rerunning simulation.")
+            else:
+                valid_cache = False
+                print("⚠️  Cached result is incomplete. Rerunning simulation.")
+
+            if valid_cache:
+                network_info = f" (Network: {network_name})" if network_name else ""
+                phases_info = f" ({len(active_phases_info)} active phases)" if active_phases_info else ""
+                print(f"🔄 Using cached {simulation_type} communication simulation result{network_info}{phases_info}")
+                return cached_result
         
         # ----------------------------------------------------
         # Prepare for simulation
         # ----------------------------------------------------
         total_packets = 0
         for traffic_matrix, _, _, _ in traffic_matrices:
-            # Each non-zero entry is one record line. To better align with gem5, we pass count of records
-            total_packets += np.count_nonzero(traffic_matrix)
+            # Use total flits (sum of matrix values) to avoid truncating traces in gem5
+            total_packets += int(np.sum(traffic_matrix))
             
         if self.simulator_type == "Garnet":
             # Prepare traffic files with multiple matrices and phase info
@@ -290,16 +327,64 @@ class CommunicationSimulator:
                         # Convert ticks to microseconds
                         latency_us = latency_ticks / (self.network_operation_frequency * self.gem5_ticks_per_cycle) * 1e6
                         all_phase_latencies_us[(net_idx, inp_idx, phase_id)] = latency_us
-                        print(f"  Network {net_idx}, Input {inp_idx}, Phase {phase_id}: {latency_ticks:.0f} ticks -> {latency_us:.2f} μs")
+                        msg2 = (f"Network {net_idx}, Input {inp_idx}, Phase {phase_id}: "
+                                f"{latency_ticks:.0f} ticks -> {latency_us:.2f} μs")
+                        print(f"  {msg2}")
+                        try:
+                            self._comm_logger.info(msg2)
+                        except Exception:
+                            pass
                     
                     # Store the converted latencies
                     network_stats["latency"]["all_phase_latencies_us"] = all_phase_latencies_us
                     
-            # Save to cache
-            if ENABLE_CACHE:
+            # Save to cache when caching is enabled
+            if (self.enable_cache):
                 self.cache_manager.store_result(cache_key, network_stats)
         
         return network_stats
+
+    def simulate_model_phase_communication(self, model):
+        """
+        Build traffic matrices for each communication phase of a single model and
+        run simulate_communication to get per-phase latencies in microseconds.
+
+        Args:
+            model: MappedModel instance
+
+        Returns:
+            Dict[(net_idx, input_idx, phase_id), latency_us]
+        """
+        traffic_matrices = []
+        net_idx = getattr(model, 'model_idx', 0)
+        # Build per-phase traffic from model phases; use stored phase.traffic
+        for phase_id, phase in model.phases.items():
+            if hasattr(phase, 'traffic') and phase.traffic:
+                # Convert dict traffic to dense matrix
+                matrix = np.zeros((self.system.num_chiplets, self.system.num_chiplets))
+                for src_chiplet_id, dests in phase.traffic.items():
+                    for dst_chiplet_id, amount in dests.items():
+                        if amount <= 0:
+                            continue
+                        matrix[src_chiplet_id - 1, dst_chiplet_id - 1] += amount
+
+                # Skip phases with no actual traffic to avoid cache expecting missing latencies
+                if np.count_nonzero(matrix) == 0:
+                    continue
+
+                # Push one tuple per input index for this phase (traffic identical across inputs)
+                for input_idx in range(model.num_inputs):
+                    traffic_matrices.append((matrix, net_idx, input_idx, phase_id))
+
+        if not traffic_matrices:
+            return {}
+
+        sim_results = self.simulate_communication(traffic_matrices, simulation_type="individual_model", network_name=getattr(model, 'model_name', None))
+        # Normalize return: extract all_phase_latencies_us if present
+        lat_us = {}
+        if sim_results and 'latency' in sim_results and 'all_phase_latencies_us' in sim_results['latency']:
+            lat_us = sim_results['latency']['all_phase_latencies_us']
+        return lat_us
 
     # ====================================================
     # Garnet Traffic File Preparation
@@ -345,13 +430,18 @@ class CommunicationSimulator:
         for traffic_matrix, network_idx, input_idx, phase_id in traffic_matrices:
             non_zero_count = np.count_nonzero(traffic_matrix)
             total_packets = np.sum(traffic_matrix)
-            print(f"  Matrix for network={network_idx}, input={input_idx}, phase={phase_id}: shape={traffic_matrix.shape}, non-zero entries={non_zero_count}, total packets={total_packets:.0f}")
+            msg = (f"Matrix for network={network_idx}, input={input_idx}, phase={phase_id}: "
+                   f"shape={traffic_matrix.shape}, non-zero entries={non_zero_count}, total packets={total_packets:.0f}")
+            print(f"  {msg}")
+            try:
+                self._comm_logger.info(msg)
+            except Exception:
+                pass
             for i in range(traffic_matrix.shape[0]):
                 for j in range(traffic_matrix.shape[1]):
                     if traffic_matrix[i, j] > 0:
-                        # Convert 0-based indices back to 1-based chiplet IDs
-                        src_chiplet_id = i + 1
-                        dst_chiplet_id = j + 1
+                        src_chiplet_id = i
+                        dst_chiplet_id = j
                         traffic_data.append((src_chiplet_id, dst_chiplet_id, traffic_matrix[i, j], network_idx, input_idx, phase_id))
         
         # One line per source-destination pair

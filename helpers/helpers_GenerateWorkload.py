@@ -9,7 +9,8 @@ import numpy as np
 import warnings
 
 # Add the DNN_models directory to the path
-sys.path.append(os.path.join(os.getcwd(), "assets", "DNN_models"))
+script_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(os.path.join(script_dir, "..", "assets", "DNN_models"))
 try:
     import model_definitions
 except ImportError:

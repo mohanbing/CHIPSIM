@@ -1,5 +1,7 @@
-import sys
 from typing import Dict, List, Optional
+import os
+import logging
+
 from .comm_types import (
     Phase, PhaseInstance, PhaseState, TrafficMatrixDict,
     ComputePhase, ActivationCommPhase, WeightLoadingPhase,
@@ -16,7 +18,7 @@ class MappedModel:
                  model_def,
                  model_metrics,
                  num_inputs,
-                 used_crossbars,
+                 used_capacity,
                  model_idx,
                  communication_method,
                  traffic_calculator: TrafficCalculator,
@@ -52,7 +54,7 @@ class MappedModel:
         self.model_completion_time_us = -1
         
         # === Physical Resource Usage ===
-        self.used_crossbars = used_crossbars   # Crossbars allocated to this model
+        self.used_capacity = used_capacity   # Capacity units allocated to this model (IMC: crossbars, CMOS: weights)
         self.layer_chiplets = {}               # Chiplets used by each layer {layer_idx: {chiplet_id, ...}}
         self.chiplet_crossbars_occupied = {}   # Crossbars occupied per chiplet {chiplet_id: count}
         
@@ -663,13 +665,45 @@ class MappedModel:
         # Store history
         instance.latency_history.append((global_time_us, new_latency_us))
         
+        # Setup debug logger (once)
+        logger = logging.getLogger('phase_debug')
+        if not logger.handlers:
+            logger.setLevel(logging.INFO)
+            logs_dir = os.path.join(os.getcwd(), 'temp', 'logs')
+            try:
+                os.makedirs(logs_dir, exist_ok=True)
+            except Exception:
+                pass
+            fh = logging.FileHandler(os.path.join(logs_dir, 'phase_debug.log'))
+            fh.setLevel(logging.INFO)
+            fmt = logging.Formatter('%(asctime)s | %(message)s')
+            fh.setFormatter(fmt)
+            logger.addHandler(fh)
+
+        # Gather context for logging
+        phase = self.phases.get(phase_id)
+        phase_type = phase.get_phase_type_name() if phase else "Unknown"
+        layer_idx = getattr(phase, 'layer_idx', -1) if phase else -1
+        # Best-effort packet total used for this phase (from last scaled_traffic if present)
+        packet_total = 0
+        if hasattr(instance, 'scaled_traffic') and instance.scaled_traffic:
+            for dests in instance.scaled_traffic.values():
+                if dests:
+                    packet_total += sum(max(0, v) for v in dests.values())
+        elif phase and hasattr(phase, 'traffic') and phase.traffic:
+            for dests in phase.traffic.values():
+                if dests:
+                    packet_total += sum(max(0, v) for v in dests.values())
+
         # Update latency
         if old_latency == 0:
             # First simulation result
             instance.latency_us = new_latency_us
-            phase = self.phases.get(phase_id)
-            phase_type = phase.get_phase_type_name() if phase else "Unknown"
-            layer_idx = getattr(phase, 'layer_idx', -1) if phase else -1
+            logger.info(
+                f"initial_update | model_idx={self.model_idx} input_idx={input_idx} phase_id={phase_id} "
+                f"phase_type={phase_type} layer_idx={layer_idx} packets={packet_total} "
+                f"old_latency_us={old_latency:.3f} new_latency_us={new_latency_us:.3f} elapsed_us=0.000"
+            )
             
         elif old_latency > 0 and instance.state == PhaseState.RUNNING:
             # Update for ongoing communication
@@ -682,6 +716,12 @@ class MappedModel:
             # Recalculate percent_complete after latency update to maintain consistency
             if instance.latency_us > 0:
                 instance.percent_complete = min(1.0, elapsed / instance.latency_us)
+            logger.info(
+                f"ongoing_update | model_idx={self.model_idx} input_idx={input_idx} phase_id={phase_id} "
+                f"phase_type={phase_type} layer_idx={layer_idx} packets={packet_total} "
+                f"old_latency_us={old_latency:.3f} new_simulated_us={new_latency_us:.3f} elapsed_us={elapsed:.3f} "
+                f"new_total_us={new_total:.3f}"
+            )
     
     def calculate_phase_timing(self, global_time_us: float) -> bool:
         """

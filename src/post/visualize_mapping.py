@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
-import os
-import json
-import numpy as np
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-import matplotlib.patches as mpatches
+
 import argparse
 import csv
+import json
+import os
 import time
+
+import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
+import numpy as np
 
 
 class ChipletVisualizer:

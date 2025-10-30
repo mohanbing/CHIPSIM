@@ -5,6 +5,7 @@ Generic utility for tracking and reporting timing statistics for simulation oper
 Provides context managers and decorators for easy timing instrumentation.
 """
 
+import os
 import time
 from contextlib import contextmanager
 from functools import wraps
@@ -46,7 +47,6 @@ class PerformanceMonitor:
         """Initialize the timing log file"""
         try:
             # Create directory if needed
-            import os
             os.makedirs(os.path.dirname(self.log_file_path), exist_ok=True)
             
             # Clear log file at the start

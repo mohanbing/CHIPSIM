@@ -10,31 +10,31 @@ import time
 from typing import Optional
 
 # Import simulation components
-from .compute_simulator import ComputeSimulator
-from .communication_simulator import CommunicationSimulator
-from .communication_orchestrator import CommunicationOrchestrator
-from .scheduling.weight_scheduler import WeightScheduler
+from src.sim.communication_orchestrator import CommunicationOrchestrator
+from src.sim.communication_simulator import CommunicationSimulator
+from src.sim.compute_simulation import ComputeSimulator
+from src.sim.scheduling import WeightScheduler
 
 # Import core components
-from ..core.system import System
-from ..core.mapped_model import MappedModel
-from ..core.traffic_calculator import TrafficCalculator
-from ..core.model_processor import ModelProcessor
+from src.core.system import System
+from src.core.mapped_model import MappedModel
+from src.core.traffic_calculator import TrafficCalculator
+from src.core.model_processor import ModelProcessor
 
 # Import managers
-from ..managers.workload_manager import WorkloadManager
-from ..managers.model_def_manager import ModelDefinitionManager
+from src.managers.workload_manager import WorkloadManager
+from src.managers.model_def_manager import ModelDefinitionManager
 
 # Import mapping components
-from ..mapping.model_mapper import ModelMapper
-from ..mapping.layer_partitioner import LayerPartitioner
+from src.mapping.model_mapper import ModelMapper
+from src.mapping.layer_partitioner import LayerPartitioner
 
 # Import utility components
-from ..utils.performance_monitor import PerformanceMonitor
-from ..utils.stats_collector import StatsCollector
+from src.utils.performance_monitor import PerformanceMonitor
+from src.utils.stats_collector import StatsCollector
 
 # Import post-simulation components
-from ..post.temporal_filter import TemporalFilter
+from src.post.temporal_filter import TemporalFilter
 
 # GlobalManager class
 class GlobalManager:
@@ -47,8 +47,8 @@ class GlobalManager:
         adj_matrix_file (str): Name of the adjacency matrix file, defaults to "adj_matrix_86x86.csv"
         chiplet_mapping_file (str): Name of the chiplet mapping file, defaults to "chiplet_mapping_86.yaml"
         model_definitions_file (str): Path to model definitions file, defaults to "model_definitions.py"
-        compute_cache_file (str): Name of the compute cache file, defaults to "compute_cache.json"
-        communication_cache_file (str): Name of the communication cache file, defaults to "communication_cache.json"
+        compute_cache_file (str): Name of the compute cache file, defaults to "compute_cache.pkl"
+        communication_cache_file (str): Name of the communication cache file, defaults to "communication_cache.pkl"
         clear_cache (bool): Whether to clear the cache, defaults to False
         communication_simulator (str): Simulator to use for communication ("Garnet" or "Booksim"), defaults to "Garnet"
         communication_method (str): Method for communication ("pipelined" or "non-pipelined"), defaults to "non-pipelined"
@@ -63,8 +63,8 @@ class GlobalManager:
         adj_matrix_file = "adj_matrix_10x10_mesh_with_io.csv",  # Now using topology with I/O chiplets
         chiplet_mapping_file = "mapping_102_with_io.yaml",  # Now using mapping with I/O chiplets
         model_definitions_file = "model_definitions.py",  # Path to model definitions file
-        compute_cache_file = "compute_cache.json",
-        communication_cache_file = "communication_cache.json",  # Add parameter for communication cache
+        compute_cache_file = "compute_cache.pkl",
+        communication_cache_file = "communication_cache.pkl",  # Add parameter for communication cache
         clear_cache = False,
         communication_simulator = "Garnet",
         communication_method = "non-pipelined",  # "pipelined" or "non-pipelined"
@@ -242,6 +242,10 @@ class GlobalManager:
             system=self.system,
             mapping_function=self.mapping_function
         )
+        # Optional seeding map: {model_idx: chiplet_id}
+        self.seed_start_chiplet_ids = {}
+        # Optional allowed chiplets per model: {model_idx: Iterable[int]}
+        self.allowed_chiplet_ids = {}
         
         # Initialize the LayerPartitioner
         self.layer_partitioner = LayerPartitioner()
@@ -275,6 +279,10 @@ class GlobalManager:
         self.gem5_deadlock_threshold = gem5_deadlock_threshold
         self.dsent_tech_node = dsent_tech_node
         self.enable_comm_cache = enable_comm_cache
+        # Allow test override via environment variable SIM_ENABLE_COMM_CACHE
+        env_cache = os.getenv('SIM_ENABLE_COMM_CACHE', '').lower()
+        if env_cache in ('1', 'true', 'yes', 'on'):
+            self.enable_comm_cache = True
     
     def _initialize_simulators(self, enable_dsent: bool):
         """Initialize compute and communication simulators."""
@@ -405,7 +413,8 @@ class GlobalManager:
 
     def simulate_compute(self, model_name, layer_idx, chiplet_id, partitioned_layer, num_layers, model_idx):
         """
-        Generate YAML config and simulate the compute of a single model chunk.
+        Simulate the compute of a single model chunk.
+        Automatically selects backend based on chiplet type (IMC vs CMOS).
         
         Args:
             model_name (str): Name of the model (e.g., 'ResNet18').
@@ -422,26 +431,25 @@ class GlobalManager:
         # Print information that compute is starting
         print(f"🔹 Compute simulation is starting for model {model_idx} ({model_name}), layer {layer_idx}, chiplet {chiplet_id}")
         
-        # Generate the YAML configuration using the compute simulator
-        yaml_config = self.compute_simulator.generate_yaml_config(
+        # Get the chiplet type and compute type
+        chiplet_type = self.system.chiplet_mapping[chiplet_id]
+        compute_type = self.system.get_chiplet_compute_type(chiplet_id)
+        chiplet_params = self.system.get_chiplet_params(chiplet_id)
+        
+        # Log the compute type being used
+        print(f"📊 Chiplet {chiplet_id} type: {chiplet_type}, compute type: {compute_type}")
+        
+        # Use the compute simulator to run the simulation
+        return self.compute_simulator.simulate_compute(
             model_name=model_name,
             layer_idx=layer_idx,
             chiplet_id=chiplet_id,
             partitioned_layer=partitioned_layer,
-            num_layers=num_layers
-        )
-        
-        if not yaml_config:
-            raise RuntimeError(f"❌ Failed to generate YAML config for model {model_name}, layer {layer_idx}, chiplet {chiplet_id}")
-        
-        # Get the chiplet type based on the chiplet_id
-        chiplet_type = self.system.chiplet_mapping[chiplet_id]
-        
-        # Use the compute simulator to run the simulation
-        return self.compute_simulator.simulate_compute(
-            yaml_config=yaml_config,
-            chiplet_id=chiplet_id,
-            chiplet_type=chiplet_type
+            num_layers=num_layers,
+            model_idx=model_idx,
+            chiplet_type=chiplet_type,
+            compute_type=compute_type,
+            chiplet_params=chiplet_params
         )
 
     def run_simulation(self):
@@ -501,7 +509,7 @@ class GlobalManager:
                     # Process the model and collect metrics using ModelProcessor
                     model_metrics = self.model_processor.process_model(model_def)
 
-                    # First, check if the model can ever fit in the system (definitive check)
+                    # First, check if the model can ever fit in the system (definitive capacity check)
                     can_ever_fit, fit_check_reason = self.system.can_model_ever_fit(model_metrics)
                     if not can_ever_fit:
                         # Model is too large for the entire system - this is a fatal error
@@ -516,7 +524,10 @@ class GlobalManager:
                         print(f"Model memory requirement: {model_memory_requirement:,.0f} weights")
                         print(f"Total system memory: {total_system_memory:,.0f} weights")
                         print(f"Memory deficit: {model_memory_requirement - total_system_memory:,.0f} weights")
-                        print(f"Memory utilization: {(model_memory_requirement / total_system_memory * 100):.1f}% of system capacity")
+                        if total_system_memory > 0:
+                            print(f"Memory utilization: {(model_memory_requirement / total_system_memory * 100):.1f}% of system capacity")
+                        else:
+                            print("Memory utilization: N/A (total system memory reported as 0)")
                         print(f"System has {self.system.num_chiplets} chiplets")
                         print(f"Compute chiplets: {self.system.num_chiplets - len(self.system.io_chiplet_ids)}")
                         print(f"I/O chiplets: {len(self.system.io_chiplet_ids)}")
@@ -527,8 +538,8 @@ class GlobalManager:
                         print("="*80)
                         sys.exit(1)
 
-                    # Perform a pre-check to see if the model can be mapped with current available memory
-                    can_map, pre_check_reason = self.system.can_map_model(model_metrics)
+                    # Second, check if the model can fit now with currently available memory
+                    can_map, pre_check_reason = self.system.can_model_fit_now(model_metrics)
                     if not can_map:
                         self.workload_manager.increment_failure_age(model_idx)
                         print(f"⚠️ Model {model_idx} ({model_name}) pre-check failed ({pre_check_reason}). Incrementing failure age.")
@@ -539,7 +550,27 @@ class GlobalManager:
 
                     # Generate the mapping for the model
                     with self._time_operation('mapping_generation'):
-                        mapping, used_crossbars, failure_reason = self.model_mapper.generate_mapping(model_metrics=model_metrics)
+                        # Build mapping preference for this model (seed + allowed chiplets if provided)
+                        mapper_preference = {}
+                        if model_idx in self.seed_start_chiplet_ids:
+                            mapper_preference["preferred_start_chiplet_id"] = self.seed_start_chiplet_ids[model_idx]
+                        if model_idx in self.allowed_chiplet_ids:
+                            mapper_preference["allowed_chiplet_ids"] = list(self.allowed_chiplet_ids[model_idx])
+
+                        if mapper_preference:
+                            prev_pref = self.model_mapper.preference
+                            try:
+                                if prev_pref:
+                                    # Merge, with mapper_preference taking precedence
+                                    merged = {**prev_pref, **mapper_preference}
+                                else:
+                                    merged = mapper_preference
+                                self.model_mapper.preference = merged
+                                mapping, used_capacity, failure_reason = self.model_mapper.generate_mapping(model_metrics=model_metrics)
+                            finally:
+                                self.model_mapper.preference = prev_pref
+                        else:
+                            mapping, used_capacity, failure_reason = self.model_mapper.generate_mapping(model_metrics=model_metrics)
                         
                     if mapping is None:
                         if failure_reason == "INSUFFICIENT_MEMORY" or failure_reason == "NO_AVAILABLE_CHIPLETS":
@@ -571,7 +602,7 @@ class GlobalManager:
                         model_start_time_us=self.global_time_us,
                         model_def=model_def,
                         num_inputs=num_inputs,
-                        used_crossbars=used_crossbars,
+                        used_capacity=used_capacity,
                         model_metrics=model_metrics,
                         model_idx=model_idx,
                         communication_method=self.communication_method,
@@ -604,7 +635,6 @@ class GlobalManager:
                     # ====================================================
                     # Loop over each layer in the model, partition the layer, and run compute simulation
                     # ====================================================
-                    #layer_loop_start = time.time() # Covered by model_process_start
                     for layer_idx, chiplet_mappings in mapping:
                         print(f"\n🔹 Layer {layer_idx}: {len(chiplet_mappings)} chiplet assignments")
 
@@ -725,14 +755,10 @@ class GlobalManager:
 
                         # Free up the crossbars occupied by the model.
 
-                        # First, get the total number of available crossbars in each chiplet
-                        prev_available_crossbars = self.system.get_available_crossbars_per_chiplet()
-
-                        # Add the number of crossbars occupied by the model to the available crossbars
-                        new_available_crossbars = prev_available_crossbars + mapped_model.used_crossbars
-
-                        # Update the state of the system to free up the crossbars
-                        self.system.update_crossbar_availability(new_available_crossbars)
+                        # Capacity-aware free: IMC uses crossbars, CMOS uses weight units
+                        prev_available_capacity = self.system.get_available_capacity_per_chiplet()
+                        new_available_capacity = prev_available_capacity + mapped_model.used_capacity
+                        self.system.update_capacity_availability(new_available_capacity)
                         print(f"    ✅ Model {model_idx} retired")
                 
                 print(f"  Retirement check complete: {retired_count} models retired, {len(self.active_mapped_models)} still active")

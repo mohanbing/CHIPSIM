@@ -66,24 +66,25 @@ class ModelMapper:
             return None, np.array([]), "INVALID_MAPPER_FUNCTION"
             
         # Get the initial state of the system *before* attempting to map this model
-        initial_available_crossbars = self.system.get_available_crossbars_per_chiplet()
+        # Use capacity units (IMC: crossbars, CMOS: weight units)
+        initial_available_capacity = self.system.get_available_capacity_per_chiplet()
         # Create a temporary state to simulate mapping
-        temp_available_crossbars = initial_available_crossbars.copy()
+        temp_available_capacity = initial_available_capacity.copy()
         
         # Ensure I/O chiplets have zero available crossbars (they should never be mapped to)
         for idx in range(len(self.system.chiplets)):
             chiplet_id = idx + 1
             if self.system.is_io_chiplet(chiplet_id):
-                temp_available_crossbars[idx] = 0
+                temp_available_capacity[idx] = 0
         
         # Process each layer in the model using the temporary state
         for layer_idx, layer_info in enumerate(model_metrics):
             # Map the current layer using the temporary available crossbars
-            layer_remaining_crossbars, action, mapping_failed, current_failure_reason = mapper_func(
+            layer_remaining_capacity, action, mapping_failed, current_failure_reason = mapper_func(
                 layer_info,
                 self.system, # Pass system for chiplet info and network topology
                 self.preference,
-                current_available_crossbars=temp_available_crossbars, # Pass the temporary state
+                current_available_crossbars=temp_available_capacity, # Temporary capacity units
                 layer_mappings=layer_mappings,
                 shortest_paths=self.shortest_paths  # Pass precomputed shortest paths
             )
@@ -94,18 +95,19 @@ class ModelMapper:
                 return None, np.array([]), failure_reason
             
             # Update the *temporary* state for the next layer's mapping
-            temp_available_crossbars = layer_remaining_crossbars
+            temp_available_capacity = layer_remaining_capacity
             
             # Store the mapping result (action percentages)
             layer_mappings.append((layer_idx, [(i+1, pct) for i, pct in enumerate(action) if pct > 0]))
         
         # If the loop completes, the entire model was successfully mapped (in the temporary state)
         
-        # Calculate the total crossbars used based on the initial and final *temporary* state
-        used_crossbars = initial_available_crossbars - temp_available_crossbars
+        # Calculate the total capacity units used based on the initial and final *temporary* state
+        used_capacity = initial_available_capacity - temp_available_capacity
         
         # Now, commit the changes to the *real* system state
-        update_success = self.system.update_crossbar_availability(temp_available_crossbars)
+        # Commit new capacity availability for both IMC and CMOS
+        update_success = self.system.update_capacity_availability(temp_available_capacity)
         
         if not update_success:
             # This indicates an internal error, as the mapping seemed successful
@@ -114,8 +116,8 @@ class ModelMapper:
             # Return failure, although the real system state might be inconsistent now
             return None, np.array([]), failure_reason
             
-        # Return the successful mapping and the calculated used crossbars
-        return layer_mappings, used_crossbars, None
+        # Return the successful mapping and the calculated used capacity units
+        return layer_mappings, used_capacity, None
     
     def _get_mapper_function(self):
         """
@@ -168,11 +170,27 @@ class ModelMapper:
         Returns:
             total_crosssbars_layer (int): Total number of crossbars required for the layer.
         """
-        # Extract chiplet-specific parameters using dot notation
+        # For IMC: return crossbars needed to host full layer on this chiplet
+        # For CMOS: return weight units for the full layer
+        BITS_PER_WEIGHT = chiplet.bits_per_weight
+        if getattr(chiplet, 'type', None) == 'CMOS':
+            # Compute total weights required for this layer
+            if layer_info['layer_type'] == 'conv':
+                # filter_size = in_channels * (kernel_size ** 2); out_channels provided
+                weights = int(layer_info['filter_size']) * int(layer_info['out_channels'])
+            elif layer_info['layer_type'] == 'fc':
+                weights = int(layer_info['in_features']) * int(layer_info['out_features'])
+            elif layer_info['layer_type'] == 'self_attention':
+                embed = int(layer_info['out_channels'])
+                weights = embed * embed
+            else:
+                weights = 0
+            return weights
+
+        # IMC path
         CROSSBAR_ROWS = chiplet.crossbar_rows
         CROSSBAR_COLUMNS = chiplet.crossbar_columns
         BITS_PER_CELL = chiplet.bits_per_cell
-        BITS_PER_WEIGHT = chiplet.bits_per_weight # 8 all the time
 
         if layer_info['layer_type'] == 'conv':
             filter_size = layer_info['filter_size'] # filter_size = in_channels * (kernel_size ** 2)
@@ -226,7 +244,8 @@ class ModelMapper:
         chiplets = system.chiplets
         num_chiplets = len(chiplets)
         
-        remaining_crossbars = current_available_crossbars.copy()
+        # Treat current_available_crossbars as capacity units (IMC: crossbars, CMOS: weights)
+        remaining_capacity = current_available_crossbars.copy()
 
         layer_name = model_layer_info['name']
         crossbars_required = model_layer_info['crossbars_required']
@@ -234,37 +253,45 @@ class ModelMapper:
         resources_remaining = crossbars_required
         percentage_remaining = 100
         
-        # Only consider compute chiplets (exclude I/O chiplets)
+        # Only consider compute chiplets (exclude I/O chiplets) and honor allowed_chiplet_ids if provided
         chiplet_indices = [idx for idx in range(num_chiplets) 
                           if not self.system.is_io_chiplet(idx + 1)]
+        allowed = None
+        if isinstance(preference, dict):
+            allowed = preference.get('allowed_chiplet_ids')
+        if not allowed and isinstance(getattr(self, 'preference', None), dict):
+            allowed = self.preference.get('allowed_chiplet_ids')
+        if allowed:
+            allowed_set = set(allowed)
+            chiplet_indices = [idx for idx in chiplet_indices if (idx + 1) in allowed_set]
         random.shuffle(chiplet_indices)
 
         for chiplet_idx in chiplet_indices:
             if resources_remaining <= 0:
                 break
             
-            available_cb = remaining_crossbars[chiplet_idx]
-            if available_cb <= 0:
+            available_units = remaining_capacity[chiplet_idx]
+            if available_units <= 0:
                 continue
             
-            crossbars_needed = self._calculate_layer_requirements(model_layer_info, chiplets[chiplet_idx])
+            units_needed_full = self._calculate_layer_requirements(model_layer_info, chiplets[chiplet_idx])
             
             if crossbars_required > 0:
-                crossbars_needed_for_resources = math.ceil(resources_remaining * crossbars_needed / crossbars_required)
+                units_needed_for_resources = math.ceil(resources_remaining * units_needed_full / crossbars_required)
             else:
-                crossbars_needed_for_resources = 0
+                units_needed_for_resources = 0
 
-            if available_cb >= crossbars_needed_for_resources:
-                remaining_crossbars[chiplet_idx] -= crossbars_needed_for_resources
+            if available_units >= units_needed_for_resources:
+                remaining_capacity[chiplet_idx] -= units_needed_for_resources
                 alloc_percentage = percentage_remaining
                 percentage_remaining = 0
                 resources_remaining = 0
             else:
-                if crossbars_needed > 0:
-                    alloc_percentage = available_cb * percentage_remaining / crossbars_needed
+                if units_needed_full > 0:
+                    alloc_percentage = available_units * percentage_remaining / units_needed_full
                 else:
                     alloc_percentage = 0
-                remaining_crossbars[chiplet_idx] = 0
+                remaining_capacity[chiplet_idx] = 0
                 percentage_remaining -= alloc_percentage
                 resources_remaining -= math.ceil(alloc_percentage * crossbars_required / 100)
             
@@ -274,13 +301,13 @@ class ModelMapper:
             print(f"⚠️ Layer '{layer_name}' allocation postponed: {resources_remaining} resources could not be allocated.")
             mapping_failed = True
             failure_reason = "INSUFFICIENT_MEMORY"
-            return current_available_crossbars, None, mapping_failed, failure_reason
+            return remaining_capacity, None, mapping_failed, failure_reason
 
         sum_action = sum(action)
         if sum_action > 0 and not math.isclose(sum_action, 100, rel_tol=1):
              print(f"Warning: Layer '{layer_name}' action sum is {sum_action}, not 100. Action: {action}")
 
-        return remaining_crossbars, action, mapping_failed, failure_reason
+        return remaining_capacity, action, mapping_failed, failure_reason
 
     def _nearest_neighbor_mapper_v3(self, model_layer_info, system, preference, current_available_crossbars, layer_mappings=None, shortest_paths=None):
         """
@@ -292,7 +319,8 @@ class ModelMapper:
         mapping_failed = False
         failure_reason = None
         num_chiplets = len(chiplets)
-        remaining_crossbars = current_available_crossbars.copy()
+        # Treat current_available_crossbars as capacity units (IMC: crossbars, CMOS: weights)
+        remaining_capacity = current_available_crossbars.copy()
 
         if shortest_paths is None:
             shortest_paths = dict(nx.all_pairs_shortest_path_length(chiplet_network))
@@ -314,28 +342,46 @@ class ModelMapper:
                 avail_memory_list.append(0)
                 occupancy_percentages.append(100)
             else:
-                avail_memory = remaining_crossbars[idx] * chiplet.memory_per_crossbar
+                unit_size = chiplet.get_capacity_unit_size()
+                avail_memory = remaining_capacity[idx] * unit_size
                 total_memory = chiplet.get_total_memory()
                 occupancy = (total_memory - avail_memory) / total_memory * 100 if total_memory > 0 else 100
                 avail_memory_list.append(avail_memory)
                 occupancy_percentages.append(occupancy)
             
         if not layer_mappings:
-            available_chiplet_ids = [idx + 1 for idx, cb in enumerate(remaining_crossbars) 
-                                    if cb > 0 and not self.system.is_io_chiplet(idx + 1)]
+            available_chiplet_ids = [idx + 1 for idx, cu in enumerate(remaining_capacity) 
+                                    if cu > 0 and not self.system.is_io_chiplet(idx + 1)]
+            # Optional restriction: allowed_chiplet_ids in self.preference
+            allowed = None
+            if hasattr(self, 'preference') and isinstance(self.preference, dict):
+                allowed = self.preference.get('allowed_chiplet_ids')
+                if allowed:
+                    allowed_set = set(allowed)
+                    available_chiplet_ids = [cid for cid in available_chiplet_ids if cid in allowed_set]
             if not available_chiplet_ids:
-                return current_available_crossbars, None, True, "NO_AVAILABLE_CHIPLETS"
+                return remaining_capacity, None, True, "NO_AVAILABLE_CHIPLETS"
 
-            chiplet_info = []
-            for chiplet_id in available_chiplet_ids:
-                idx = chiplet_id - 1
-                metric_value = chiplet_network.nodes[chiplet_id].get(active_metric, 0)
-                chiplet_info.append((chiplet_id, avail_memory_list[idx], metric_value))
+            # Optional override: honor preferred starting chiplet for the first layer mapping
+            preferred_start_id = None
+            if preference and isinstance(preference, dict):
+                preferred_start_id = preference.get("preferred_start_chiplet_id")
+                if preferred_start_id not in available_chiplet_ids:
+                    preferred_start_id = None
 
-            chiplet_info.sort(key=lambda x: (-x[1], -x[2]))
-            
-            sorted_chiplets_ids = [chiplet_id for chiplet_id, _, _ in chiplet_info]
-            starting_chiplet = sorted_chiplets_ids[0]
+            if preferred_start_id is not None:
+                starting_chiplet = preferred_start_id
+            else:
+                chiplet_info = []
+                for chiplet_id in available_chiplet_ids:
+                    idx = chiplet_id - 1
+                    metric_value = chiplet_network.nodes[chiplet_id].get(active_metric, 0)
+                    chiplet_info.append((chiplet_id, avail_memory_list[idx], metric_value))
+
+                chiplet_info.sort(key=lambda x: (-x[1], -x[2]))
+                
+                sorted_chiplets_ids = [chiplet_id for chiplet_id, _, _ in chiplet_info]
+                starting_chiplet = sorted_chiplets_ids[0]
         else:
             last_layer_mapping = layer_mappings[-1][1]
             last_chiplet = max(last_layer_mapping, key=lambda x: x[1])[0]
@@ -343,10 +389,26 @@ class ModelMapper:
             
         distances = shortest_paths.get(starting_chiplet, {})
         if not distances and num_chiplets > 1:
-            return current_available_crossbars, None, True, "NO_CHIPLET_CONNECTIONS"
+            return remaining_capacity, None, True, "NO_CHIPLET_CONNECTIONS"
 
-        available_chiplet_ids = [idx + 1 for idx, cb in enumerate(remaining_crossbars) 
-                                if cb > 0 and not self.system.is_io_chiplet(idx + 1)]
+        available_chiplet_ids = [idx + 1 for idx, cu in enumerate(remaining_capacity) 
+                                if cu > 0 and not self.system.is_io_chiplet(idx + 1)]
+        # Apply allowed filter again for the allocation pass
+        allowed = None
+        if hasattr(self, 'preference') and isinstance(self.preference, dict):
+            allowed = self.preference.get('allowed_chiplet_ids')
+        if allowed:
+            allowed_set = set(allowed)
+            available_chiplet_ids = [cid for cid in available_chiplet_ids if cid in allowed_set]
+        available_chiplet_ids = [idx + 1 for idx, cu in enumerate(remaining_capacity) 
+                                if cu > 0 and not self.system.is_io_chiplet(idx + 1)]
+        # Apply allowed filter consistently
+        allowed = None
+        if hasattr(self, 'preference') and isinstance(self.preference, dict):
+            allowed = self.preference.get('allowed_chiplet_ids')
+        if allowed:
+            allowed_set = set(allowed)
+            available_chiplet_ids = [cid for cid in available_chiplet_ids if cid in allowed_set]
         
         chiplet_info = []
         for chiplet_id in available_chiplet_ids:
@@ -363,39 +425,39 @@ class ModelMapper:
             if resources_remaining <= 0:
                 break
             chiplet_idx = chiplet_id - 1
-            available_cb = remaining_crossbars[chiplet_idx]
-            if available_cb <= 0:
+            available_units = remaining_capacity[chiplet_idx]
+            if available_units <= 0:
                 continue
 
-            crossbars_needed = self._calculate_layer_requirements(model_layer_info, chiplets[chiplet_idx])
-            if crossbars_needed <= 0: continue
+            units_needed_full = self._calculate_layer_requirements(model_layer_info, chiplets[chiplet_idx])
+            if units_needed_full <= 0: continue
 
             if crossbars_required > 0:
-                crossbars_needed_for_resources = math.ceil(resources_remaining * crossbars_needed / crossbars_required)
+                units_needed_for_resources = math.ceil(resources_remaining * units_needed_full / crossbars_required)
             else:
-                crossbars_needed_for_resources = 0
+                units_needed_for_resources = 0
             
-            if available_cb >= crossbars_needed_for_resources:
-                remaining_crossbars[chiplet_idx] -= crossbars_needed_for_resources
+            if available_units >= units_needed_for_resources:
+                remaining_capacity[chiplet_idx] -= units_needed_for_resources
                 alloc_percentage = percentage_remaining
                 percentage_remaining = 0
                 resources_remaining = 0
             else:
-                alloc_percentage = available_cb * 100 / crossbars_needed
-                remaining_crossbars[chiplet_idx] = 0
+                alloc_percentage = (available_units * 100 / units_needed_full) if units_needed_full > 0 else 0
+                remaining_capacity[chiplet_idx] = 0
                 percentage_remaining -= alloc_percentage
                 resources_remaining -= math.ceil(alloc_percentage * crossbars_required / 100)
             
             action[chiplet_idx] += alloc_percentage
 
         if (resources_remaining - 10) > 0:
-            return current_available_crossbars, None, True, "INSUFFICIENT_MEMORY"
+            return remaining_capacity, None, True, "INSUFFICIENT_MEMORY"
 
         sum_action = sum(action)
         if sum_action > 0 and not math.isclose(sum_action, 100, rel_tol=1):
              print(f"Warning: Layer '{layer_name}' action sum is {sum_action}, not 100. Action: {action}")
         
-        return remaining_crossbars, action, False, None
+        return remaining_capacity, action, False, None
     
     def set_preference(self, performance: float = 1.0, energy_efficiency: float = 0.0):
         """

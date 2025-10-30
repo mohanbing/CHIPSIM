@@ -1,12 +1,9 @@
-import yaml
-import numpy as np
 import networkx as nx
-import sys
-import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+import numpy as np
+import yaml
 
-from .chiplet import Chiplet
 from assets.chiplet_specs.chiplet_params import CHIPLET_TYPES
+from .chiplet import Chiplet
 
 # load material properties from yaml file
 def load_dict_yaml(yaml_file):
@@ -47,7 +44,7 @@ class System:
         for chiplet in self.chiplets:
             self.system_memory += chiplet.get_total_memory()
 
-        self.get_memory_per_crossbar()
+        # Capacity model is used for availability; per-crossbar memory may still be used via chiplet API when needed
         
         # Load adjacency matrix
         self.adj_matrix = np.loadtxt(adj_matrix_file)
@@ -85,14 +82,14 @@ class System:
 
             # Retrieve metrics from CHIPLET_TYPES_DICT
             chiplet_info = CHIPLET_TYPES_DICT.get(chiplet_type, {})
-            performance = chiplet_info.get('tops', 0)  # Default to 0 if not found
+            compute_type = chiplet_info.get('type', 'Unknown')  # IMC, CMOS, or IO
             energy_efficiency = chiplet_info.get('energy_per_mac', 0)  # Default to 0 if not found
 
             # Add node with all attributes
             G.add_node(
                 chiplet_id,
                 chiplet_type=chiplet_type,
-                performance=performance,
+                compute_type=compute_type,
                 energy_efficiency=energy_efficiency,
             )
         
@@ -121,6 +118,38 @@ class System:
     def is_compute_chiplet(self, chiplet_id: int) -> bool:
         """Check if a chiplet is a compute chiplet"""
         return chiplet_id in self.compute_chiplet_ids
+    
+    def get_chiplet_compute_type(self, chiplet_id: int) -> str:
+        """
+        Get the compute type (IMC, CMOS, or IO) for a specific chiplet.
+        
+        Args:
+            chiplet_id: ID of the chiplet
+            
+        Returns:
+            str: Compute type ('IMC', 'CMOS', or 'IO')
+        """
+        if chiplet_id not in self.chiplet_network:
+            raise ValueError(f"Chiplet ID {chiplet_id} not found in network")
+        return self.chiplet_network.nodes[chiplet_id].get('compute_type', 'Unknown')
+    
+    def get_chiplet_params(self, chiplet_id: int) -> dict:
+        """
+        Get all parameters for a specific chiplet from CHIPLET_TYPES.
+        
+        Args:
+            chiplet_id: ID of the chiplet
+            
+        Returns:
+            dict: Chiplet parameters including type, energy_per_mac, etc.
+        """
+        from assets.chiplet_specs.chiplet_params import CHIPLET_TYPES
+        
+        chiplet_type_name = self.chiplet_mapping.get(chiplet_id, 'Unknown')
+        for chiplet_params in CHIPLET_TYPES:
+            if chiplet_params['name'] == chiplet_type_name:
+                return chiplet_params
+        return {}
     
     def get_edge_chiplets(self) -> list:
         """Get compute chiplets at the edge of the mesh (connected to I/O)"""
@@ -189,32 +218,43 @@ class System:
         
         return available_memory
 
-    def get_available_crossbars_per_chiplet(self):
+    # Crossbar-specific availability API removed in favor of capacity-based API
+
+    def get_available_capacity_per_chiplet(self):
         """
-        Retrieves the current number of available crossbars in each chiplet.
+        Retrieves the current number of available capacity units in each chiplet.
+        IMC: capacity unit == crossbar; CMOS: capacity unit == single weight.
 
         Returns:
-            numpy.ndarray: Array where each element corresponds to the number of available crossbars in a chiplet.
+            numpy.ndarray: Array of available capacity units per chiplet.
         """
-        crossbar_availability = np.zeros(self.num_chiplets, dtype=int)
+        capacity = np.zeros(self.num_chiplets, dtype=int)
         for chiplet in self.chiplets:
             chiplet_id = chiplet.id
-            available_crossbars = chiplet.get_available_crossbars()
-            crossbar_availability[chiplet_id - 1] = available_crossbars
-
-        return crossbar_availability
+            capacity[chiplet_id - 1] = chiplet.get_available_capacity_units()
+        return capacity
     
-    def get_memory_per_crossbar(self):
+    # memory_per_crossbar system-level array removed; query chiplet.memory_per_crossbar when needed
+
+    def update_capacity_availability(self, remaining_capacity_units):
         """
-        Retrieves the memory per crossbar in the system.
+        Updates the available capacity units in each chiplet based on mapping results.
+        IMC: updates available crossbars; CMOS: updates available weights.
+
+        Args:
+            remaining_capacity_units (np.array): Remaining capacity units per chiplet.
 
         Returns:
-            numpy.ndarray: Array where each element corresponds to the memory per crossbar in a chiplet.
+            bool: True if update was successful, False otherwise.
         """
-        self.memory_per_crossbar = np.zeros(self.num_chiplets, dtype=int)
-        for chiplet in self.chiplets:
-            chiplet_id = chiplet.id
-            self.memory_per_crossbar[chiplet_id - 1] = chiplet.memory_per_crossbar        
+        if len(remaining_capacity_units) != self.num_chiplets:
+            print(f"System Class Error: Expected {self.num_chiplets} values in remaining_capacity_units array, got {len(remaining_capacity_units)}")
+            exit(1)
+
+        for i, chiplet in enumerate(self.chiplets):
+            if not chiplet.set_available_capacity_units(int(remaining_capacity_units[i])):
+                return False
+        return True
     
     def get_total_system_memory(self):
         """
@@ -258,54 +298,25 @@ class System:
         
         return True, None
 
-    def can_map_model(self, model_metrics):
+    def can_model_fit_now(self, model_metrics):
         """
-        Performs a pre-check to see if there is enough total memory
-        in the system for an entire model. This does not account for
-        fragmentation, so a successful check does not guarantee a successful mapping.
+        Check if a model can fit given current available memory across chiplets.
+        Uses per-chiplet available memory (supports both IMC and CMOS semantics).
 
         Args:
-            model_metrics (list): A list of dictionaries, where each dict describes a layer.
+            model_metrics (list): Layer metrics for the model
 
         Returns:
-            tuple: (bool, str or None). True if it can technically be mapped,
-                   False with a reason string if not.
+            tuple: (bool, str or None)
         """
-        # Use crossbars_required for memory requirement
-        total_required_weights = sum(layer['crossbars_required'] for layer in model_metrics)
-
-        available_crossbars = self.get_available_crossbars_per_chiplet()
-        total_available_memory = (self.memory_per_crossbar * available_crossbars).sum()
+        total_required_weights = self.get_model_memory_requirement(model_metrics)
+        total_available_memory = int(self.get_available_memory_in_system().sum())
 
         if total_required_weights > total_available_memory:
             return False, "INSUFFICIENT_MEMORY"
-
         return True, None
 
-    def update_crossbar_availability(self, remaining_crossbars):
-        """
-        Updates the available crossbars in each chiplet based on mapping results.
-        
-        Args:
-            remaining_crossbars (np.array): Array indicating remaining available crossbars per chiplet.
-            
-        Returns:
-            bool: True if update was successful, False otherwise.
-        """
-        if len(remaining_crossbars) != self.num_chiplets:
-            print(f"System Class Error: Expected {self.num_chiplets} values in remaining_crossbars array, got {len(remaining_crossbars)}")
-            exit(1)
-        
-        # Update the available crossbars for each chiplet
-        for i, chiplet in enumerate(self.chiplets):
-            # Ensure that the new available crossbars are not greater than the total crossbars
-            if remaining_crossbars[i] > chiplet.total_crossbars:
-                raise ValueError(f"System Class Error: Chiplet {chiplet.id} would have more available crossbars than it has total crossbars")
-                
-            # Set the new availability directly
-            chiplet.set_available_crossbars(remaining_crossbars[i])
-        
-        return True
+    # Crossbar-specific update API removed; use update_capacity_availability instead
         
     def get_path_length_between_chiplets(self, chiplet_id1, chiplet_id2):
         """

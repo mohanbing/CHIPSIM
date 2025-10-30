@@ -23,19 +23,6 @@ python3 `which scons` build/Garnet_standalone/gem5.opt -j12
 - `gem5.opt`: Optimized build (faster simulation)
 - `gem5.debug`: Debug build (slower, more verbose)
 
-**Build requirements:**
-- Python 3.6+
-- SCons build system
-- C++ compiler (gcc 7+ or clang 6+)
-- Development libraries (see gem5 documentation)
-
-### Verify Installation
-
-Test that gem5 built successfully:
-
-```bash
-./build/Garnet_standalone/gem5.opt --version
-```
 
 ## Standalone Garnet Testing
 
@@ -92,39 +79,11 @@ Run Garnet with real workload traces:
 
 Estimate NoI power consumption using DSENT.
 
+To build DSENT, navigate to `/integrations/gem5/ext/dsent` and run `make`.
+
 ### Prerequisites
 
 Ensure gem5 is built with DSENT support:
-
-```bash
-cd integrations/gem5
-python3 `which scons` build/Garnet_standalone/gem5.opt --with-dsent -j12
-```
-
-### Run Power Analysis
-
-After a Garnet simulation completes:
-
-```bash
-python util/on-chip-network-power-area.py . m5out \
-    gem5/ext/dsent/configs/garnet_router.cfg \
-    gem5/ext/dsent/configs/garnet_link.cfg \
-    32 500
-```
-
-**Arguments:**
-1. `.`: gem5 root directory
-2. `m5out`: Output directory from simulation
-3. Router config file path
-4. Link config file path
-5. `32`: Technology node (nm)
-6. `500`: Frequency (MHz)
-
-**Output:**
-- Per-router dynamic and static power
-- Per-link dynamic and static power
-- Router area
-- Total network power and area
 
 ### DSENT Configuration Files
 
@@ -165,11 +124,15 @@ Modify these files to match your NoI design.
 ### Configuration in Simulation Config
 
 ```yaml
-comm_simulator: "Garnet"  # Use gem5 Garnet (vs. Booksim)
-enable_dsent: false        # Enable power analysis
-gem5_sim_cycles: 500000000 # Max simulation cycles
-gem5_ticks_per_cycle: 1000 # Time resolution
-dsent_tech_node: "32"      # For power analysis
+simulation:
+  core_settings:
+    comm_simulator: "Garnet"   # gem5 Garnet (Booksim not implemented)
+    enable_dsent: false         # Enable power analysis via DSENT
+  gem5_parameters:
+    gem5_sim_cycles: 500000000  # Max simulation cycles
+    gem5_ticks_per_cycle: 1000  # Time resolution (do not change)
+  dsent_parameters:
+    dsent_tech_node: "32"       # For power analysis
 ```
 
 ### gem5 Output Files
@@ -180,28 +143,6 @@ gem5 creates several output files in the simulation results directory:
 - `config.ini`: Network configuration used
 - `network.txt`: Network topology and routing
 - `power.txt`: Power estimates (if DSENT enabled)
-
-## Troubleshooting
-
-### Build Errors
-
-**Issue:** "Could not find scons"
-```bash
-pip install scons
-```
-
-**Issue:** Missing dependencies
-```bash
-# Ubuntu/Debian
-sudo apt-get install build-essential scons python3-dev zlib1g-dev
-
-# See gem5 documentation for other platforms
-```
-## Advanced Usage
-
-### Custom Topologies
-
-Custom topologies can be integrated into Garnet, as performed for the hardware validation. Documentation TBD. 
 
 
 ## Related Documentation

@@ -13,17 +13,22 @@ A co-simulation framework for evaluating DNN workload execution on chiplet-based
 
 1. **Run a simulation**
    ```bash
-   python3 run_simulation.py --config <config file name>
+   python3 simulate.py --mode simulate --config <config_name>
    ```
 
-2. **Process results**
+2. **Re-process existing results**
    ```bash
-   python3 post_simulation_processor.py
+   python3 simulate.py --mode reprocess --config <config_name> --results-dir <raw_results_dir>
    ```
 
 3. **View outputs**
-   - Results saved to `_results/formatted_results/<experiment_config>`
+   - Raw results: `_results/raw_results/<timestamp>_<summary>/`
+   - Formatted results: `_results/formatted_results/<raw_results_dir_name>/`
    - Metrics, plots, and visualizations included
+
+## Prerequisites
+
+- **CIMLoop API container**: IMC chiplet compute relies on `CIMLoopBackend` calling the REST API defined in `integrations/CIMLoop_API.py`, which targets `http://localhost:5000` by default. You must run the modified CIMLoop Docker container that exposes this API endpoint. Without the container the simulator cannot obtain latency and energy for IMC chiplets and the run will abort when those chiplets are scheduled. CMOS chiplets use the analytical compute backend and can still simulate without CIMLoop.
 
 ## Simulation Workflow
 
@@ -91,10 +96,12 @@ Maps chiplet IDs to chiplet types and their compute specifications.
 ...
 ```
 
-**Available chiplet types:** `IO`, `Accumulator`, `SharedADC`, `ADCless`, `RAELLA`
+**Available chiplet types:** `IO`, `Accumulator`, `SharedADC`, `ADCless`, `RAELLA`, `CMOS_Compute`
 - Each type defined in `assets/chiplet_specs/chiplet_params.py`
 - Types differ in compute capabilities, area, and power
-- Not all metrics specified in chiplet_params.py are used
+- Memory model:
+  - IMC chiplets: capacity tracked as crossbars; available memory derives from available crossbars × memory per crossbar
+  - CMOS chiplets: capacity tracked as weight units; `total_memory_weights` is defined in params and decrements when weights are mapped
 
 ### Model Definitions (`assets/DNN_models/model_definitions.py`)
 Python dictionary defining DNN architectures layer-by-layer.
@@ -129,40 +136,59 @@ Simulation configs are YAML files in `configs/experiments/`. Each config specifi
 ### Example Config (`configs/experiments/config_1.yaml`)
 
 ```yaml
-# Input files
-workload: "workload_alexnet.csv"
-adj_matrix: "adj_matrix_10x10_mesh.csv"
-chiplet_mapping: "mapping_100_with_io.yaml"
-model_defs: "model_definitions.py"
+simulation:
+  # Input files
+  input_files:
+    workload: "workload_alexnet.csv"
+    adj_matrix: "adj_matrix_10x10_mesh.csv"
+    chiplet_mapping: "mapping_100_with_io.yaml"  # or "mapping_100_cmos_with_io.yaml" for CMOS-only compute
+    model_defs: "model_definitions.py"
 
-# Simulation parameters
-comm_simulator: "Garnet"              # 'Garnet' or 'Booksim'
-comm_method: "pipelined"              # 'pipelined' or 'non-pipelined'
-weight_stationary: true               # Weights stay on chiplets
-weight_loading_strategy: "all_at_once" # or "just_in_time"
+  # Core simulation settings
+  core_settings:
+    clear_cache: false
+    comm_simulator: "Garnet"           # 'Garnet' or 'Booksim' (Booksim not implemented)
+    comm_method: "pipelined"            # 'pipelined' or 'non-pipelined'
+    enable_dsent: false
+    enable_comm_cache: true
+    warmup_period_us: 0.0
+    blocking_age_threshold: 10
+    weight_stationary: true
+    weight_loading_strategy: "all_at_once" # or "just_in_time"
 
-# Network parameters
-bits_per_activation: 8
-bits_per_packet: 128
-network_operation_frequency_hz: 1000000000  # 1 GHz
+  # Network / hardware parameters
+  hardware_parameters:
+    bits_per_activation: 8
+    bits_per_packet: 128
+    network_operation_frequency_hz: 1000000000
 
-# Performance options
-enable_dsent: false                   # DSENT power/area analysis
-enable_comm_cache: false              # Cache network simulation results
-warmup_period_us: 0.0                 # Warmup before metrics collection
+  # gem5-specific parameters
+  gem5_parameters:
+    gem5_sim_cycles: 500000000
+    gem5_injection_rate: 0.0
+    gem5_ticks_per_cycle: 1000
+    gem5_deadlock_threshold: null
 
-# gem5 parameters (advanced)
-gem5_sim_cycles: 500000000
-gem5_injection_rate: 0.0
-gem5_ticks_per_cycle: 1000
-dsent_tech_node: "32"
+  # DSENT parameters
+  dsent_parameters:
+    dsent_tech_node: "32"
+
+# Post-processing configuration (optional; enables auto post-processing)
+post_processing:
+  warmup_period_us: 0.0
+  cooldown_period_us: 0.0
+  run_wkld_agg_comm: false
+  run_ind_comm: false
+  run_net_agg_comm: false
+  generate_plots: true
+  generate_visualizations: false
 ```
 
 ### Key Parameters
 
 | Parameter | Options | Description |
 |-----------|---------|-------------|
-| `comm_simulator` | `Garnet`, `Booksim` | Only Garnet currently supported |
+| `comm_simulator` | `Garnet`, `Booksim` | Only Garnet supported (Booksim not implemented) |
 | `comm_method` | `pipelined`, `non-pipelined` | Communication scheduling approach |
 | `weight_stationary` | `true`, `false` | Weights loaded once vs. per-inference |
 | `weight_loading_strategy` | `all_at_once`, `just_in_time` | Weight loading timing |
@@ -175,10 +201,19 @@ See [Advanced Features](docs/advanced-features.md) for detailed parameter descri
 ### Basic Usage
 
 ```bash
-python3 run_simulation.py --config config_1
+python3 simulate.py --mode simulate --config config_1
 ```
 
 The config name refers to files in `configs/experiments/` (e.g., `config_1` → `configs/experiments/config_1.yaml`).
+
+Other modes:
+```bash
+# Re-process a past run into formatted results
+python3 simulate.py --mode reprocess --config config_1 --results-dir <raw_results_dir>
+
+# Cross-simulation analysis (see configs/cross_analysis/*.yaml)
+python3 simulate.py --mode cross-analysis --config example_comparison
+```
 
 ### What Happens During Simulation
 
@@ -187,7 +222,7 @@ The config name refers to files in `configs/experiments/` (e.g., `config_1` → 
 3. **Map DNN layers** to chiplets using partitioning algorithm
 4. **Execute workload**:
    - Compute simulation: Model analog compute latency
-   - Communication simulation: Gem5 Garnet or Booksim for NoI
+   - Communication simulation: gem5 Garnet for NoI
    - Weight scheduling: Manage weight transfers
 5. **Save results**: Pickled state and raw metrics to `_results/`
 
@@ -202,18 +237,12 @@ Results are saved to `_results/raw_results/<timestamp>/`:
 
 ## Post-Processing
 
-After simulation completes, analyze results with the post-processor:
+If your config includes a `post_processing` section, post-processing runs automatically.
 
+To re-run post-processing later:
 ```bash
-python3 post_simulation_processor.py
+python3 simulate.py --mode reprocess --config <config_name> --results-dir <raw_results_dir>
 ```
-
-### Configuration
-
-Edit `POST_PROCESSOR_JOB_FILE` in `post_simulation_processor.py` to select analysis jobs:
-- `default_jobs.yaml`: Standard metrics and plots
-- `quick_analysis.yaml`: Fast analysis without visualizations
-- `full_analysis.yaml`: Comprehensive analysis with all features
 
 ### Analysis Features
 
@@ -225,7 +254,7 @@ Configure per-simulation in job files:
 
 ### Output
 
-Enhanced results added to `_results/formatted_results/<simulation_config>/`:
+Enhanced results added to `_results/formatted_results/<raw_results_dir_name>/`:
 - `metrics_summary.txt`: Key performance metrics
 - `plots/`: Timeline and communication plots
 - `visualizations/`: Chiplet mapping and utilization

@@ -8,7 +8,9 @@ Enable communication result caching to speed up repeated simulations with identi
 
 **Configuration:**
 ```yaml
-enable_comm_cache: true
+simulation:
+  core_settings:
+    enable_comm_cache: true
 ```
 
 **How it works:**
@@ -33,7 +35,9 @@ Configure how model weights are transferred to chiplets.
 
 ### All At Once
 ```yaml
-weight_loading_strategy: "all_at_once"
+simulation:
+  core_settings:
+    weight_loading_strategy: "all_at_once"
 ```
 
 - Loads all model weights at simulation start
@@ -43,7 +47,9 @@ weight_loading_strategy: "all_at_once"
 
 ### Just In Time
 ```yaml
-weight_loading_strategy: "just_in_time"
+simulation:
+  core_settings:
+    weight_loading_strategy: "just_in_time"
 ```
 
 - Loads weights immediately before layer execution
@@ -53,14 +59,18 @@ weight_loading_strategy: "just_in_time"
 
 ### Weight Stationary Mode
 ```yaml
-weight_stationary: true
+simulation:
+  core_settings:
+    weight_stationary: true
 ```
 
 - Weights remain on chiplets between inferences
 - Only loads weights once per model (not per inference)
 
 ```yaml
-weight_stationary: false
+simulation:
+  core_settings:
+    weight_stationary: false
 ```
 
 - Weights reloaded for each inference
@@ -70,19 +80,39 @@ weight_stationary: false
 
 ### Pipelined Communication
 ```yaml
-comm_method: "pipelined"
+simulation:
+  core_settings:
+    comm_method: "pipelined"
 ```
 
 **Behavior:**
 - Overlaps execution of model layers by independent inputs
 - Layer N of input A can execute while layer N+1 of input B executes
-- Maximizes throughput for batched workloads
+- Maximizes throughput
 - More complex scheduling
 
 ### Non-Pipelined Communication
 ```yaml
-comm_method: "non-pipelined"
+simulation:
+  core_settings:
+    comm_method: "non-pipelined"
 ```
+
+## CMOS Analytical Compute
+
+CMOS chiplets use an analytical compute backend (no crossbars). Compute latency and energy are derived from total MACs and per-chiplet parameters.
+
+- `CMOS_Compute` parameters (see `assets/chiplet_specs/chiplet_params.py`):
+  - `macs_per_second`, `energy_per_mac`, and a hard-coded `total_memory_weights`
+- During mapping, weights assigned to a CMOS chiplet decrement its available weight capacity.
+
+## Capacity Tracking (IMC vs CMOS)
+
+The mapper uses a unified capacity model:
+- **IMC**: capacity units are crossbars. Available memory derives from available crossbars × memory per crossbar. Layer requirements are calculated as crossbars needed.
+- **CMOS**: capacity units are weight units. Available capacity equals remaining `total_memory_weights`. Layer requirements are the number of weights.
+
+This enables consistent “ever fit” (total capacity) and “fit now” (available capacity) checks across chiplet types.
 
 **Behavior:**
 - Sequential compute-then-communicate for each input
@@ -93,8 +123,11 @@ comm_method: "non-pipelined"
 Enable power and area estimation for the Network-on-Interposer using DSENT.
 
 ```yaml
-enable_dsent: true
-dsent_tech_node: "32"  # Technology node in nm
+simulation:
+  core_settings:
+    enable_dsent: true
+  dsent_parameters:
+    dsent_tech_node: "32"  # Technology node in nm
 ```
 
 **Requirements:**
@@ -115,7 +148,23 @@ See [GEM5 Integration](gem5-integration.md) for DSENT setup details.
 Exclude initial warmup period from metric collection to get steady-state performance.
 
 ```yaml
-warmup_period_us: 1000.0  # First 1000 microseconds excluded
+# During simulation
+simulation:
+  core_settings:
+    warmup_period_us: 1000.0  # First 1000 microseconds excluded
+
+# During post-processing only (if reprocessing)
+post_processing:
+  warmup_period_us: 1000.0
+```
+
+## Cooldown Period
+
+Exclude the last segment of the run from metric collection (e.g., to avoid tail effects).
+
+```yaml
+post_processing:
+  cooldown_period_us: 0.0  # Exclude last X microseconds (0.0 disables)
 ```
 
 **Use cases:**
@@ -129,7 +178,9 @@ warmup_period_us: 1000.0  # First 1000 microseconds excluded
 Configure the NoI operating frequency:
 
 ```yaml
-network_operation_frequency_hz: 1000000000  # 1 GHz
+simulation:
+  hardware_parameters:
+    network_operation_frequency_hz: 1000000000  # 1 GHz
 ```
 
 Affects:
@@ -142,8 +193,10 @@ Affects:
 Configure data representation and packet sizes:
 
 ```yaml
-bits_per_activation: 8    # Activation data width
-bits_per_packet: 128      # Network packet size
+simulation:
+  hardware_parameters:
+    bits_per_activation: 8    # Activation data width
+    bits_per_packet: 128      # Network packet size
 ```
 
 **bits_per_activation:**
@@ -152,18 +205,17 @@ bits_per_packet: 128      # Network packet size
 
 **bits_per_packet:**
 - Affects packet count and network granularity
-- Typical values: 64, 128, 256 bits
-- Smaller packets → more routing overhead
-- Larger packets → higher serialization latency
 
 ## Advanced GEM5 Parameters
 
 Fine-tune gem5 Garnet simulation:
 
 ```yaml
-gem5_sim_cycles: 500000000    # Maximum simulation cycles
-gem5_injection_rate: 0.0      # For synthetic traffic (use 0.0 for trace)
-gem5_ticks_per_cycle: 1000    # Time resolution
+simulation:
+  gem5_parameters:
+    gem5_sim_cycles: 500000000    # Maximum simulation cycles
+    gem5_injection_rate: 0.0      # For synthetic traffic (use 0.0 for trace)
+    gem5_ticks_per_cycle: 1000    # Time resolution
 ```
 
 **gem5_sim_cycles:**

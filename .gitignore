@@ -5,7 +5,6 @@ traffic_matrix.txt
 /garnet_traffic
 __pycache__/
 _results/*
-cache/communication_cache.json
 _old/
 __pycache__/*
 _DEBUG_TRAFFIC/*
@@ -17,10 +16,15 @@ temp/*
 /integrations/analytical_models/
 timing_summary.log
 /debugging/outputs/*
-/cache/*
+/cache
 /tests
 *.json
 /hacks
 /AMD_run_scripts
 /helpers/create_new_model_def.py
 /helpers/fuse_vit_qkv.py
+TODO.md
+/debugging
+/integrations/gem5/1_757_files
+/integrations/booksim_simulator
+.pytest_cache/
