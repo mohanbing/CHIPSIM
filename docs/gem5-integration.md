@@ -2,6 +2,23 @@
 
 The simulator integrates gem5's Garnet network simulator for cycle-accurate Network-on-Interposer (NoI) modeling.
 
+## Known Limitations
+
+- For automatic topology generation, layout of nodes must be square and regular. 
+
+## AnyNET Topology Conversion
+
+During a simulation run, the communication simulator writes `integrations/gem5/configs/topologies/myTopology.yaml` before invoking Garnet. Each adjacency matrix entry is translated into an allowed router connection for the custom AnyNET topology:
+
+- Router IDs are assumed to follow row-major ordering.
+- Links that remain within the same row (east/west) are created with weight `1`.
+- Links that move between rows (north/south) are created with weight `2` to preserve XY-style ordering.
+- Links that do not align to rows or columns (diagonal/irregular) default to weight `1` unless you further customize the YAML or topology script.
+
+If you need bespoke routing weights or non-orthogonal wiring, edit `myTopology.yaml` after it is generated, or subclass `AnyNET_XY` under `integrations/gem5/configs/topologies/`. You can also bypass the helper entirely by writing your own YAML topology and pointing `gem5_topology_config_relpath` to it inside the simulation config.
+
+For generating adjacency matrices programmatically, see the helpers in `helpers/` (documented in [Helper Scripts](helper-scripts.md)).
+
 ## Installation
 
 ### Build gem5 for Network Simulation

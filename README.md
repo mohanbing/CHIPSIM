@@ -84,6 +84,8 @@ Adjacency matrix defining the Network-on-Interposer (NoI) interconnect topology.
 
 **Format:** CSV adjacency matrix where `matrix[i][j] = 1` indicates a direct link from chiplet `i` to chiplet `j`.
 
+When Garnet runs in AnyNET mode, the simulator converts the selected adjacency matrix into `integrations/gem5/configs/topologies/myTopology.yaml`. Links that stay within a row (east/west) keep weight `1`, while links that move between rows (north/south) are assigned weight `2` to enforce XY-style ordering. Mixed or diagonal connections default to weight `1`.
+
 **Common topologies:**
 - `adj_matrix_10x10_mesh.csv`: 100-chiplet 2D mesh
 - `adj_matrix_10x10_floret.csv`: Floret topology
@@ -93,7 +95,7 @@ Adjacency matrix defining the Network-on-Interposer (NoI) interconnect topology.
 ```bash
 python3 helpers/helpers_GenerateAdjMatrix.py
 ```
-See [Helper Scripts](docs/helper-scripts.md) for details.
+See [Helper Scripts](docs/helper-scripts.md) for details. For more involved layouts, you can supply your own adjacency matrix or edit the generated YAML inside `integrations/gem5/configs/topologies/`; see [GEM5 Integration](docs/gem5-integration.md#anynet-topology-conversion) for guidance.
 
 ### Chiplet Mapping (`assets/chiplet_specs/*.yaml`)
 Maps chiplet IDs to chiplet types and their compute specifications.

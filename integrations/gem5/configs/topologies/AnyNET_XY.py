@@ -3,6 +3,7 @@ from topologies.BaseTopology import SimpleTopology
 
 from m5.objects import *
 from m5.params import *
+import math
 import sys
 #path to your yaml package
 #sys.path.insert(0, "/disk/user/project_dir/gem5/build/Garnet_standalone/python-packages")
@@ -47,6 +48,20 @@ class AnyNET_XY(SimpleTopology):
                 for conn in connect_list:
                     allowed_set.add(tuple(conn))
 
+        # Determine grid dimensions (assumes regular mesh-style layout)
+        num_rows = getattr(options, "mesh_rows", None)
+        if num_rows is None or num_rows <= 0:
+            num_rows = int(math.sqrt(num_routers))
+            if num_rows == 0 or num_rows * num_rows != num_routers:
+                raise ValueError(
+                    "Unable to infer mesh_rows for AnyNET topology; please specify --mesh-rows"
+                )
+        num_cols = num_routers // num_rows
+        if num_rows * num_cols != num_routers or num_cols == 0:
+            raise ValueError(
+                f"Invalid mesh dimensions derived for AnyNET topology: rows={num_rows}, cols={num_cols}"
+            )
+
         int_links = []
 
         def append_link(src, dst, outport, inport, weight):
@@ -66,7 +81,17 @@ class AnyNET_XY(SimpleTopology):
 
         # Create internal links based on YAML
         for (src, dst) in allowed_set:
-            append_link(src, dst, "Link", "Link", 1)
+            src_row, src_col = divmod(src, num_cols)
+            dst_row, dst_col = divmod(dst, num_cols)
+
+            if src_row == dst_row:
+                link_weight = 1  # Horizontal link (east/west)
+            elif src_col == dst_col:
+                link_weight = 2  # Vertical link (north/south)
+            else:
+                link_weight = 1  # Diagonal or irregular link; default to 1
+
+            append_link(src, dst, "Link", "Link", link_weight)
 
         network.ext_links = ext_links
         network.int_links = int_links
