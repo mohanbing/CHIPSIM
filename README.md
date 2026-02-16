@@ -8,9 +8,9 @@ A co-simulation framework for evaluating DNN workload execution on chiplet-based
 - Thermal integration is currently manual
 
 
-## Manuscript
+## Paper
 
-The paper CHIPSIM was created for can be found here: **TODO**
+CHIPSIM paper found here: [10.1109/OJSSCS.2025.3626314](https://doi.org/10.1109/OJSSCS.2025.3626314)
 
 ## Documentation
 
@@ -38,7 +38,57 @@ The paper CHIPSIM was created for can be found here: **TODO**
 
 ## Prerequisites
 
+- **Python 3.7+**: The simulator requires Python 3.7 or higher
 - **CIMLoop API container**: IMC chiplet compute relies on `CIMLoopBackend` calling the REST API defined in `integrations/CIMLoop_API.py`, which targets `http://localhost:5000` by default. You must run the modified CIMLoop Docker container that exposes this API endpoint. Without the container the simulator cannot obtain latency and energy for IMC chiplets and the run will abort when those chiplets are scheduled. CMOS chiplets use the analytical compute backend and can still simulate without CIMLoop.
+
+  **Docker setup (required for IMC simulation)**
+  ```bash
+  docker pull pfromm/cimloop-api:0.1.1
+  docker run -d --name cimloop-api -p 5000:5000 pfromm/cimloop-api:0.1.1
+  ```
+
+  **Start the CIMLoop API server (required)**
+  Open a second terminal and run:
+  ```bash
+  docker exec -it cimloop-api bash
+  cd /home/api_server
+  python3 api_server.py
+  ```
+  Keep this terminal open while running the simulator (it hosts the API on `http://localhost:5000`).
+
+  Notes:
+  - Use `pfromm/cimloop-api:0.1.1` or newer (it includes the required `/home/workspace` components in the image).
+  - Do **not** mount a host directory onto `/home/workspace` unless you know what you are doing (it can hide Python modules the API server imports).
+  - If you want to persist API outputs, mount only the outputs subfolder:
+    ```bash
+    mkdir -p cimloop_outputs
+    docker run -d --name cimloop-api -p 5000:5000 \
+      -v "$PWD/cimloop_outputs:/home/workspace/outputs" \
+      pfromm/cimloop-api:0.1.1
+    ```
+  - The image also contains a Jupyter environment (port 8888), but it is not required for simulator integration.
+  - This container is derived from the upstream CiMLoop project described in [CiMLoop: A Flexible, Accurate, and Fast Compute-In-Memory Modeling Tool (ISPASS 2024)](https://arxiv.org/abs/2405.07259).
+
+## Installation
+
+1. **Install Python dependencies:**
+   ```bash
+   pip install -r /docs/requirements.txt
+   ```
+   
+   Required packages:
+   - `numpy` - Numerical operations
+   - `scipy` - Scientific computing (thermal model)
+   - `networkx` - Graph operations for topology
+   - `pyyaml` - Configuration file parsing
+   - `matplotlib` - Plotting and visualization
+   - `requests` - CIMLoop API communication
+   - `scons` - Build system for gem5 compilation
+
+2. **External tools** (optional, depending on your configuration):
+   - **CIMLoop**: For IMC chiplet compute simulation
+   - **gem5**: For detailed network simulation (if not using the simple model)
+   - **DSENT**: For interconnect power/energy modeling
 
 ## Simulation Workflow
 

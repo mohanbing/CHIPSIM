@@ -34,7 +34,7 @@ from src.utils.config_loader import load_config
 # CONFIGURABLE DEFAULTS (Edit these directly)
 # ============================================
 DEFAULT_MODE = "simulate"  # Options: "simulate", "reprocess", "cross-analysis", "batch"
-DEFAULT_CONFIG = "config_3"
+DEFAULT_CONFIG = "config_1"
 DEFAULT_RESULTS_DIR = None  # For reprocess mode
 DEFAULT_CONFIGS = []  # For batch mode (list of config names)
 DEFAULT_CROSS_CONFIG = None  # For cross-analysis mode

@@ -182,7 +182,16 @@ class CrossSimProcessor:
         gm.filter_retired_networks_by_warmup()
         
         # Create metric computer
-        dsent_stats_path = os.path.join(raw_results_dir, 'dsent_stats.jsonl')
+        dsent_stats_path = getattr(gm, 'dsent_stats_file', None)
+        if not dsent_stats_path or not os.path.exists(dsent_stats_path):
+            pkl_path = os.path.join(raw_results_dir, 'dsent_stats.pkl')
+            legacy_path = os.path.join(raw_results_dir, 'dsent_stats.jsonl')
+            if os.path.exists(pkl_path):
+                dsent_stats_path = pkl_path
+            elif os.path.exists(legacy_path):
+                dsent_stats_path = legacy_path
+            else:
+                dsent_stats_path = pkl_path
         
         try:
             metric_computer = MetricComputer(

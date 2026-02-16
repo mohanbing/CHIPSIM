@@ -1,22 +1,8 @@
 import os
-from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
-# --- Unified MetricNode Dataclass ---
-@dataclass
-class MetricNode:
-    section: str = ""
-    name: str = ""
-    value: Optional[Any] = None  # For simple metrics
-    values: Optional[Dict[str, Any]] = None  # For structured metrics
-    columns: Optional[List[str]] = None  # For tables
-    rows: Optional[List[Dict[str, Any]]] = None  # For tables
-    description: str = ""  # For empty tables or explanations
-    children: Optional[List["MetricNode"]] = field(default_factory=list)  # For nested/grouped metrics
-    unit: str = ""
-    fmt: str = ".2f"
-    save_children_separately: bool = False  # If True, each child will be saved as a separate file
-    children_folder_name: Optional[str] = None  # If specified, children will be saved in this subfolder
+# Import MetricNode from new module (Phase 1 refactoring)
+from .metric_node import MetricNode
 
 # --- MetricFormatter Class ---
 

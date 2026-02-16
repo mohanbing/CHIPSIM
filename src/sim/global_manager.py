@@ -340,13 +340,16 @@ class GlobalManager:
                 if os.path.isfile(file_path):
                     os.remove(file_path)
         
-        dsent_stats_file = os.path.join(dsent_stats_dir, "dsent_stats.jsonl")
+        dsent_stats_file = os.path.join(dsent_stats_dir, "dsent_stats.pkl")
         self.dsent_collector = StatsCollector(
             stats_file_path=dsent_stats_file,
             dump_threshold=1,
             stats_type="dsent",
-            auto_initialize_file=True
+            auto_initialize_file=True,
+            serialization_format="pickle"
         )
+        self.dsent_stats_file = dsent_stats_file
+        self.dsent_stats_format = "pickle"
         
         # Store DSENT flag for later use
         self.enable_dsent_flag = enable_dsent

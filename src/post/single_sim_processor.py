@@ -116,8 +116,12 @@ class SingleSimProcessor:
         """Load the simulation state from the pickle file."""
         print("\n🔄 Loading simulation state...")
         
-        # Find the .pkl file
-        pkl_files = glob.glob(os.path.join(self.raw_results_dir, "*.pkl"))
+        # Find the .pkl file that contains the serialized GlobalManager state.
+        # Ignore auxiliary pickle files (e.g., dsent_stats.pkl) that now live alongside it.
+        pkl_files = [
+            path for path in glob.glob(os.path.join(self.raw_results_dir, "*.pkl"))
+            if "dsent_stats" not in os.path.basename(path)
+        ]
         
         if len(pkl_files) != 1:
             raise RuntimeError(
@@ -216,8 +220,19 @@ class SingleSimProcessor:
         print("\n⚙️  Computing metrics...")
         start = time.time()
         
-        # Find DSENT stats file
-        dsent_stats_path = os.path.join(self.raw_results_dir, 'dsent_stats.jsonl')
+        # Locate the DSENT stats file. The SimulationRunner now stores the final
+        # path on the GlobalManager before serialization, but we keep a small
+        # fallback for legacy/raw runs.
+        dsent_stats_path = getattr(self.gm, 'dsent_stats_file', None)
+        if not dsent_stats_path or not os.path.exists(dsent_stats_path):
+            pkl_path = os.path.join(self.raw_results_dir, 'dsent_stats.pkl')
+            json_path = os.path.join(self.raw_results_dir, 'dsent_stats.jsonl')
+            if os.path.exists(pkl_path):
+                dsent_stats_path = pkl_path
+            elif os.path.exists(json_path):
+                dsent_stats_path = json_path
+            else:
+                dsent_stats_path = pkl_path  # default path for warning messages
         
         # Initialize metric computer
         self.metric_computer = MetricComputer(

@@ -19,8 +19,8 @@ simulation:
     clear_cache: false
     comm_simulator: "Garnet"  # Options: 'Garnet' or 'Booksim'
     comm_method: "non-pipelined"  # Options: 'pipelined' or 'non-pipelined'
-    enable_dsent: false
-    enable_comm_cache: true
+    enable_dsent: true
+    enable_comm_cache: false
     blocking_age_threshold: 10
     weight_stationary: true
     weight_loading_strategy: "all_at_once"  # Options: "all_at_once" or "just_in_time"

@@ -1,5 +1,7 @@
 # communication_orchestrator.py
 
+import os
+import logging
 import numpy as np
 from typing import Dict, List, Tuple, Optional
 import ast
@@ -373,15 +375,23 @@ class CommunicationOrchestrator:
             global_time_us: Current simulation time
             
         Returns:
-            bool: True if update was successful, False otherwise
+            bool: True if update was successful
+            
+        Raises:
+            RuntimeError: If communication simulation failed or returned invalid results
         """
         if not network_stats:
-            print(f"❌ ERROR: network_stats is None or empty after simulation")
-            return False
+            raise RuntimeError(
+                "❌ ERROR: Communication simulation returned no results.\n"
+                "The network simulator (Garnet) failed to produce valid statistics."
+            )
         
         if "latency" not in network_stats:
-            print(f"❌ ERROR: No latency key in network_stats. Stats: {network_stats}")
-            return False
+            raise RuntimeError(
+                f"❌ ERROR: Communication simulation returned invalid results.\n"
+                f"Missing 'latency' key in network statistics.\n"
+                f"Stats received: {network_stats}"
+            )
         
         # Process latencies for all phases
         if "all_phase_latencies_us" in network_stats["latency"]:
@@ -391,8 +401,11 @@ class CommunicationOrchestrator:
                 global_time_us
             )
         else:
-            print(f"❌ ERROR: All phase latencies are 0. Stats: {network_stats}")
-            return False
+            raise RuntimeError(
+                f"❌ ERROR: Communication simulation returned zero latencies for all phases.\n"
+                f"This indicates the network simulator failed to properly process traffic.\n"
+                f"Stats received: {network_stats}"
+            )
         
         # Store DSENT stats if available
         self._store_dsent_stats(network_stats, active_phases, global_time_us)
@@ -457,6 +470,35 @@ class CommunicationOrchestrator:
             active_phases: List of active phase tuples
             global_time_us: Current simulation time
         """
+        # DEBUG DSENT: use dedicated logger in temp/logs (easy to remove later)
+        logger = None
+        try:
+            logger = logging.getLogger("dsent_debug")
+            if not logger.handlers:
+                logs_dir = os.path.join(os.getcwd(), "temp", "logs")
+                os.makedirs(logs_dir, exist_ok=True)
+                logger.setLevel(logging.INFO)
+                fh = logging.FileHandler(os.path.join(logs_dir, "dsent_debug.log"))
+                fh.setLevel(logging.INFO)
+                fmt = logging.Formatter("%(asctime)s | %(message)s")
+                fh.setFormatter(fmt)
+                logger.addHandler(fh)
+        except Exception:
+            logger = None
+
+        # DEBUG DSENT: high-level visibility into what we got back from the simulator
+        if logger:
+            try:
+                has_power = bool(network_stats.get('power'))
+                has_area = bool(network_stats.get('area'))
+                has_energy = bool(network_stats.get('energy'))
+                logger.info(
+                    f"_store_dsent_stats at {global_time_us} us: "
+                    f"power={has_power}, area={has_area}, energy={has_energy}"
+                )
+            except Exception:
+                pass
+
         if network_stats.get('power') or network_stats.get('area') or network_stats.get('energy'):
             dsent_results = {
                 'power': network_stats.get('power', {}),
@@ -466,16 +508,47 @@ class CommunicationOrchestrator:
             
             # Store DSENT stats using StatsCollector
             if dsent_results['power'] or dsent_results['area'] or dsent_results['energy']:
+                # Include latency block as well so downstream power/energy profiling
+                # can use the actual communication runtime instead of inferring it
+                # from successive global_time_us entries.
+                latency_block = network_stats.get('latency', {})
+
                 global_dsent_entry = {
                     'global_time_us': global_time_us,
                     'active_phases': [
                         (net_idx, inp_idx, phase_id, layer_idx, phase_type_name)
                         for net_idx, inp_idx, phase_id, layer_idx, phase_type_name in active_phases
                     ],
+                    'latency': latency_block,
                     **dsent_results
                 }
+
+                # DEBUG DSENT: inspect entry size and target file
+                if logger:
+                    try:
+                        stats_path = getattr(self.dsent_collector, 'stats_file_path', '<unknown>')
+                        logger.info(
+                            f"adding entry to collector (file={stats_path}, "
+                            f"routers={len(dsent_results['power'].get('routers', []))}, "
+                            f"link_power_keys={list(dsent_results['power'].get('links', {}).keys())})"
+                        )
+                    except Exception:
+                        pass
+
                 self.dsent_collector.add_stats(global_dsent_entry)
+
+                # Force immediate flush so DSENT stats persist even if another part of the code
+                # changes the collector's dump threshold (safe to remove once issue is resolved)
+                try:
+                    self.dsent_collector.dump_stats()
+                except Exception:
+                    if logger:
+                        logger.warning("Failed to dump DSENT stats immediately after add_stats()", exc_info=True)
         else:
             # Make this a warning
-            print(f"⚠️ WARNING: No DSENT stats found after simulation.")
+            if logger:
+                try:
+                    logger.warning("No DSENT stats found after simulation.")
+                except Exception:
+                    pass
 

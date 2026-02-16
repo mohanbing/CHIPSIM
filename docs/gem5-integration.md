@@ -35,6 +35,12 @@ Build Garnet standalone:
 python3 `which scons` build/Garnet_standalone/gem5.opt -j12
 ```
 
+Alternatively, try witout python3:
+
+```bash
+scons build/Garnet_standalone/gem5.opt -j12
+```
+
 **Build options:**
 - `-j12`: Use 12 parallel jobs (adjust based on your CPU cores)
 - `gem5.opt`: Optimized build (faster simulation)
@@ -78,8 +84,8 @@ Run Garnet with real workload traces:
     --num-dirs=100 \
     --topology=Mesh_XY \
     --mesh-rows=10 \
-    --sim-cycles=50000 \
-    --injectionrate=0 \
+    --sim-cycles=50 \
+    --injectionrate=1 \
     --network-trace-enable \
     --network-trace-file="debug.log.gz" \
     --network-trace-max-packets=1

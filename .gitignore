@@ -28,3 +28,5 @@ TODO.md
 /integrations/gem5/1_757_files
 /integrations/booksim_simulator
 .pytest_cache/
+htmlcov/
+.coverage

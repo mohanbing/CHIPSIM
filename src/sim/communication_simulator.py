@@ -68,6 +68,10 @@ class CommunicationSimulator:
         chiplet_simulator_root = os.path.abspath(os.path.join(current_file_dir, "..", ".."))
         self.gem5_path = os.path.join(chiplet_simulator_root, "integrations", "gem5")
         
+        # Verify Garnet standalone is built if using Garnet simulator
+        if self.simulator_type == "Garnet":
+            self._verify_garnet_availability()
+        
         # Initialize the cache manager
         self.cache_manager = CacheManager(cache_file, clear_cache)
 
@@ -93,6 +97,35 @@ class CommunicationSimulator:
         # Host-side path for writing the topology YAML used by gem5
         topology_yaml_path_host = os.path.join(self.gem5_path, "configs/topologies/myTopology.yaml")
         self._convert_adj_matrix_to_yaml_topology(self.system.adj_matrix, topology_yaml_path_host)
+
+    # ====================================================
+    # Garnet Availability Check
+    # ====================================================
+    def _verify_garnet_availability(self):
+        """
+        Verify that Garnet standalone is built and available.
+        
+        Raises:
+            FileNotFoundError: If gem5 directory or Garnet binary is not found
+            RuntimeError: If Garnet standalone is not built
+        """
+        # Check if gem5 directory exists
+        if not os.path.isdir(self.gem5_path):
+            raise FileNotFoundError(
+                f"❌ gem5 directory not found at: {self.gem5_path}\n"
+                f"Please see docs/gem5-integration.md for installation instructions."
+            )
+        
+        # Check if Garnet standalone binary exists
+        garnet_binary = os.path.join(self.gem5_path, "build", "Garnet_standalone", "gem5.opt")
+        
+        if not os.path.isfile(garnet_binary):
+            raise RuntimeError(
+                f"❌ Garnet standalone is not installed.\n"
+                f"Please see docs/gem5-integration.md for build instructions."
+            )
+        
+        print(f"✅ Garnet standalone found at: {garnet_binary}")
 
     # ====================================================
     # Main Communication Simulation

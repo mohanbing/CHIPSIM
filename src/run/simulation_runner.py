@@ -52,8 +52,8 @@ class SimulationRunner:
         
         # Save results
         self._create_output_directory()
-        self._save_simulation_state()
         self._move_dsent_stats()
+        self._save_simulation_state()
         
         # Print summary
         total_duration = time.time() - start_time
@@ -166,17 +166,19 @@ class SimulationRunner:
     def _move_dsent_stats(self):
         """Move DSENT stats file to the results directory if it exists."""
         if not hasattr(self.gm, 'dsent_stats_file'):
-            return
+            return None
             
         dsent_stats_source = self.gm.dsent_stats_file
         
         if not os.path.exists(dsent_stats_source):
             print("ℹ️  No DSENT stats file found")
-            return
+            self.gm.dsent_stats_file = None
+            return None
             
         if os.path.getsize(dsent_stats_source) == 0:
             print("ℹ️  DSENT stats file is empty")
-            return
+            self.gm.dsent_stats_file = None
+            return None
         
         dsent_stats_filename = os.path.basename(dsent_stats_source)
         dsent_stats_dest = os.path.join(self.raw_results_dir, dsent_stats_filename)
@@ -190,10 +192,19 @@ class SimulationRunner:
             temp_dsent_dir = os.path.dirname(dsent_stats_source)
             if os.path.exists(temp_dsent_dir) and not os.listdir(temp_dsent_dir):
                 os.rmdir(temp_dsent_dir)
-                
+            
+            self.gm.dsent_stats_file = dsent_stats_dest
+            if hasattr(self.gm, 'dsent_collector'):
+                try:
+                    self.gm.dsent_collector.stats_file_path = dsent_stats_dest
+                except Exception:
+                    pass
+            
             print("✅ DSENT stats file moved successfully")
+            return dsent_stats_dest
         except Exception as e:
             print(f"⚠️  WARNING: Failed to move DSENT stats file: {e}")
+            return None
     
     def _print_summary(self, total_duration):
         """Print simulation summary."""
